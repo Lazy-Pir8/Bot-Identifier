@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "reddit-bot-identifier"
+version = "1.0.0"
+description = "Real-time Reddit bot detection engine with multi-factor scoring"
+requires-python = ">=3.11"
+dependencies = [
+    "praw>=7.8",
+    "asyncpraw>=7.8",
+    "aiohttp>=3.10",
+    "aiosqlite>=0.20",
+    "requests>=2.32",
+    "rich>=13.9",
+    "click>=8.1",
+    "python-dotenv>=1.0",
+    "jellyfish>=1.1",      # fuzzy string matching
+    "textstat>=0.7",        # readability / Flesch metrics
+    "scipy>=1.14",          # stats for entropy, IAT variance
+    "numpy>=2.1",
+]
+
+[project.scripts]
+botid = "src.cli:cli"
+
+[tool.setuptools.packages.find]
+where = ["."]
+
