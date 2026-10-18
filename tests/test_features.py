@@ -178,6 +178,17 @@ class TestTextForensics:
         detail = score_linguistics([])
         assert detail.final_score == 0.0
 
+    def test_template_self_similarity_detection(self):
+        # Repetitive template comments (like tippr or downloader bots)
+        comments = [
+            {"body": "User A, you've received 0.001 BCH! Click here for details.", "id": "t1"},
+            {"body": "User B, you've received 0.005 BCH! Click here for details.", "id": "t2"},
+            {"body": "User C, you've received 0.002 BCH! Click here for details.", "id": "t3"},
+        ]
+        detail = score_linguistics(comments)
+        assert detail.template_score >= 0.70, f"Template score should be high, got {detail.template_score}"
+        assert detail.final_score >= 0.70, f"Final linguistic score should be high, got {detail.final_score}"
+
 
 # ─── Run tests directly ────────────────────────────────────────────────────────
 

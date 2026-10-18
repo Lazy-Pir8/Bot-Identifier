@@ -1,0 +1,97 @@
+{
+  "description": "Benchmark test dataset for reddit-bot-identifier validation and regression testing",
+  "version": "1.0",
+  "accounts": [
+    {
+      "username": "AutoModerator",
+      "expected_label": "BOT",
+      "category": "official_moderation_bot",
+      "notes": "Reddit official automoderation bot"
+    },
+    {
+      "username": "RemindMeBot",
+      "expected_label": "BOT",
+      "category": "utility_summon_bot",
+      "notes": "Reddit user summons reminder bot"
+    },
+    {
+      "username": "tippr",
+      "expected_label": "BOT",
+      "category": "crypto_tipping_bot",
+      "notes": "Cryptocurrency tipping bot with template comments"
+    },
+    {
+      "username": "r2tg_bot",
+      "expected_label": "BOT",
+      "category": "downloader_bridge_bot",
+      "notes": "Reddit to Telegram video downloader bot"
+    },
+    {
+      "username": "haikusbot",
+      "expected_label": "BOT",
+      "category": "entertainment_utility_bot",
+      "notes": "Detects haikus in Reddit comments"
+    },
+    {
+      "username": "WikiTextBot",
+      "expected_label": "BOT",
+      "category": "utility_scraper_bot",
+      "notes": "Extracts Wikipedia intro paragraphs for links"
+    },
+    {
+      "username": "sneakpeekbot",
+      "expected_label": "BOT",
+      "category": "utility_scraper_bot",
+      "notes": "Gives subreddit top post previews"
+    },
+    {
+      "username": "auddbot",
+      "expected_label": "BOT",
+      "category": "audio_recognition_bot",
+      "notes": "Identifies music in video clips"
+    },
+    {
+      "username": "alphabet_order_bot",
+      "expected_label": "BOT",
+      "category": "entertainment_utility_bot",
+      "notes": "Flags comments where words are alphabetically ordered"
+    },
+    {
+      "username": "converter-bot",
+      "expected_label": "BOT",
+      "category": "unit_converter_bot",
+      "notes": "Converts imperial and metric units"
+    },
+    {
+      "username": "spez",
+      "expected_label": "HUMAN",
+      "category": "admin_human",
+      "notes": "Reddit CEO / founder account"
+    },
+    {
+      "username": "kn0thing",
+      "expected_label": "HUMAN",
+      "category": "admin_human",
+      "notes": "Alexis Ohanian reddit co-founder"
+    },
+    {
+      "username": "poem_for_your_sprog",
+      "expected_label": "HUMAN",
+      "category": "creative_power_human",
+      "notes": "Famous novelty account writing original poetry (human)"
+    },
+    {
+      "username": "shittymorph",
+      "expected_label": "HUMAN",
+      "category": "novelty_human",
+      "notes": "Human novelty account known for nineteen ninety eight undertaker jokes"
+    },
+    {
+      "username": "GovSchwarzenegger",
+      "expected_label": "HUMAN",
+      "category": "celebrity_human",
+      "notes": "Arnold Schwarzenegger official human account"
+    }
+  ]
+}
+

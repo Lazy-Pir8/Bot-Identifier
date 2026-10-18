@@ -222,6 +222,122 @@ def add_phrase(phrase: str, phrase_type: str):
     console.print(f"[green]✓ Added [{phrase_type}] phrase: \"{phrase}\"[/green]")
 
 
+# ─── botid serve ─────────────────────────────────────────────────────────────
+@cli.command("serve")
+@click.option("--host", "-h", default="127.0.0.1", help="Host address to bind")
+@click.option("--port", "-p", default=8000, type=int, help="Port to listen on")
+def serve(host: str, port: int):
+    """Start the local HTTP API server for browser extensions."""
+    from src.server import start_server
+    start_server(host=host, port=port)
+
+
+# ─── botid benchmark ─────────────────────────────────────────────────────────
+@cli.command("benchmark")
+@click.option("--dataset", "-d", default=None, help="Path to custom benchmark dataset JSON")
+def benchmark(dataset: str | None):
+    """Run benchmark evaluation on the ground-truth bot dataset."""
+    from src.benchmark import run_benchmark, BENCHMARK_FILE
+    ds_path = Path(dataset) if dataset else BENCHMARK_FILE
+    asyncio.run(run_benchmark(ds_path))
+
+
+# ─── botid scan-page ─────────────────────────────────────────────────────────
+@cli.command("scan-page")
+@click.argument("target")
+@click.option("--limit", "-n", default=25, help="Maximum number of commenters to scan")
+def scan_page(target: str, limit: int):
+    """Scan all commenters on a Reddit post URL or submission ID."""
+    import re
+    import requests
+
+    # Extract submission id if full URL is given
+    sub_match = re.search(r"comments\/([a-z0-9]+)", target, re.IGNORECASE)
+    sub_id = sub_match.group(1) if sub_match else target.replace("t3_", "").strip()
+
+    console.print(f"[cyan]Fetching commenters from Reddit submission: {sub_id}...[/cyan]")
+
+    # Query public archive for comments on this submission
+    url = f"https://arctic-shift.photon-reddit.com/api/comments/search?link_id=t3_{sub_id}&limit=100"
+    authors = []
+    try:
+        r = requests.get(url, timeout=8)
+        if r.status_code == 200:
+            comments = r.json().get("data", [])
+            for c in comments:
+                a = c.get("author")
+                if a and a not in ("[deleted]", "[removed]") and a not in authors:
+                    authors.append(a)
+    except Exception:
+        pass
+
+    if not authors:
+        # Fallback to Reddit public JSON
+        try:
+            r2 = requests.get(
+                f"https://www.reddit.com/comments/{sub_id}.json",
+                headers={"User-Agent": "Mozilla/5.0"},
+                timeout=6,
+            )
+            if r2.status_code == 200 and isinstance(r2.json(), list) and len(r2.json()) > 1:
+                children = r2.json()[1].get("data", {}).get("children", [])
+                for child in children:
+                    a = child.get("data", {}).get("author")
+                    if a and a not in ("[deleted]", "[removed]") and a not in authors:
+                        authors.append(a)
+        except Exception:
+            pass
+
+    if not authors:
+        console.print("[red]Could not retrieve comments for this submission. Verify ID/URL or network.[/red]")
+        return
+
+    authors = authors[:limit]
+    console.print(f"[green]Discovered {len(authors)} distinct authors. Running multi-factor analysis...[/green]\n")
+
+    async def _analyze_all():
+        await db.init_db()
+        from src.models.bot_classifier import analyze_user
+        results = []
+        for a in authors:
+            try:
+                res = await analyze_user(a)
+                results.append(res)
+            except Exception:
+                pass
+        return results
+
+    results = asyncio.run(_analyze_all())
+
+    table = Table(
+        title=f"Page Scan Report: Submission {sub_id}",
+        box=box.ROUNDED,
+        border_style="cyan",
+        show_lines=True,
+    )
+    table.add_column("Author", style="bold", no_wrap=True)
+    table.add_column("Verdict", justify="center")
+    table.add_column("Score", justify="right")
+    table.add_column("Meta", justify="right")
+    table.add_column("Temporal", justify="right")
+    table.add_column("Linguistic", justify="right")
+    table.add_column("Key Signals", style="dim")
+
+    for res in sorted(results, key=lambda x: x.bot_score, reverse=True):
+        lc = _label_color(res.label)
+        table.add_row(
+            f"u/{res.username}",
+            f"[{lc}][bold]{res.label}[/bold][/{lc}]",
+            _score_bar(res.bot_score, width=10),
+            f"{res.score_meta:.2f}",
+            f"{res.score_temporal:.2f}",
+            f"{res.score_linguistic:.2f}",
+            res.all_notes[0] if res.all_notes else "Clean profile",
+        )
+
+    console.print(table)
+
+
 # ─── botid setup ─────────────────────────────────────────────────────────────
 @cli.command()
 def setup():
@@ -246,3 +362,4 @@ def setup():
 
 if __name__ == "__main__":
     cli()
+

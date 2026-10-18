@@ -19,6 +19,7 @@ import time
 from dataclasses import dataclass, field
 from typing import AsyncIterator, Optional
 
+import aiohttp
 import asyncpraw
 import asyncpraw.exceptions
 
@@ -76,7 +77,7 @@ async def fetch_redditor_profile(
     )
 
     if not has_credentials:
-        return await _fetch_from_arctic_shift(username, max_comments)
+        return await _fetch_from_public_archives(username, max_comments)
 
     reddit = _make_reddit()
     try:
@@ -120,8 +121,8 @@ async def fetch_redditor_profile(
             profile.history_hidden = True
             profile.fetch_error = "forbidden"
         else:
-            # Fall back to Arctic Shift
-            return await _fetch_from_arctic_shift(username, max_comments)
+            # Fall back to public archives
+            return await _fetch_from_public_archives(username, max_comments)
     finally:
         try:
             await reddit.close()
@@ -131,35 +132,109 @@ async def fetch_redditor_profile(
     return profile
 
 
-async def _fetch_from_arctic_shift(username: str, max_comments: int = 100) -> RedditorProfile:
-    """Fetch user comments and metadata from Arctic Shift public archive (no API keys required)."""
+async def _fetch_from_arctic_shift(session, username: str, max_comments: int = 100) -> list[dict]:
+    """Fetch comments from Arctic Shift public archive."""
+    url = f"https://arctic-shift.photon-reddit.com/api/comments/search?author={username}&limit={max_comments}"
+    async with session.get(url, timeout=aiohttp.ClientTimeout(total=6)) as resp:
+        if resp.status == 200:
+            payload = await resp.json()
+            raw_comments = payload.get("data", [])
+            return [
+                {
+                    "id": c.get("id", ""),
+                    "body": c.get("body", ""),
+                    "subreddit": c.get("subreddit", ""),
+                    "created_utc": float(c.get("created_utc", 0.0)),
+                    "score": int(c.get("score", 0)),
+                    "permalink": c.get("permalink", ""),
+                    "submission_id": c.get("link_id", ""),
+                    "parent_id": c.get("parent_id", ""),
+                }
+                for c in raw_comments
+                if c.get("body")
+            ]
+    return []
+
+
+async def _fetch_from_pullpush(session, username: str, max_comments: int = 100) -> list[dict]:
+    """Fetch comments from Pullpush public archive (fallback source)."""
+    url = f"https://api.pullpush.io/reddit/search/comment/?author={username}&size={max_comments}"
+    async with session.get(url, timeout=aiohttp.ClientTimeout(total=6)) as resp:
+        if resp.status == 200:
+            payload = await resp.json()
+            raw_comments = payload.get("data", [])
+            return [
+                {
+                    "id": c.get("id", ""),
+                    "body": c.get("body", ""),
+                    "subreddit": c.get("subreddit", ""),
+                    "created_utc": float(c.get("created_utc", 0.0)),
+                    "score": int(c.get("score", 0)),
+                    "permalink": c.get("permalink", ""),
+                    "submission_id": c.get("link_id", ""),
+                    "parent_id": c.get("parent_id", ""),
+                }
+                for c in raw_comments
+                if c.get("body")
+            ]
+    return []
+
+
+async def _fetch_from_reddit_public_json(session, username: str, max_comments: int = 100) -> list[dict]:
+    """Fetch comments directly from Reddit unauthenticated public JSON."""
+    url = f"https://www.reddit.com/user/{username}/comments.json?limit={min(max_comments, 100)}"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+    }
+    async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=6)) as resp:
+        if resp.status == 200:
+            payload = await resp.json()
+            children = payload.get("data", {}).get("children", [])
+            return [
+                {
+                    "id": c.get("data", {}).get("id", ""),
+                    "body": c.get("data", {}).get("body", ""),
+                    "subreddit": c.get("data", {}).get("subreddit", ""),
+                    "created_utc": float(c.get("data", {}).get("created_utc", 0.0)),
+                    "score": int(c.get("data", {}).get("score", 0)),
+                    "permalink": c.get("data", {}).get("permalink", ""),
+                    "submission_id": c.get("data", {}).get("link_id", ""),
+                    "parent_id": c.get("data", {}).get("parent_id", ""),
+                }
+                for c in children
+                if c.get("data", {}).get("body")
+            ]
+    return []
+
+
+async def _fetch_from_public_archives(username: str, max_comments: int = 100) -> RedditorProfile:
+    """Multi-source resilient fetcher: tries Arctic Shift -> Pullpush -> Reddit JSON."""
     import aiohttp
     profile = RedditorProfile(username=username)
-    url = f"https://arctic-shift.photon-reddit.com/api/comments/search?author={username}&limit={max_comments}"
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, timeout=aiohttp.ClientTimeout(total=8)) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    raw_comments = data.get("data", [])
-                    comments = []
-                    for c in raw_comments:
-                        comments.append({
-                            "id": c.get("id", ""),
-                            "body": c.get("body", ""),
-                            "subreddit": c.get("subreddit", ""),
-                            "created_utc": float(c.get("created_utc", 0.0)),
-                            "score": int(c.get("score", 0)),
-                            "permalink": c.get("permalink", ""),
-                            "submission_id": c.get("link_id", ""),
-                            "parent_id": c.get("parent_id", ""),
-                        })
-                    profile.recent_comments = comments
-                    if comments:
-                        profile.created_utc = min(c["created_utc"] for c in comments) - 86400 * 30
-                        profile.comment_karma = sum(max(c["score"], 0) for c in comments)
-    except Exception as e:
-        profile.fetch_error = f"arctic_shift_error: {e}"
+    comments = []
+    sources = [
+        ("Arctic Shift", _fetch_from_arctic_shift),
+        ("Pullpush", _fetch_from_pullpush),
+        ("Reddit Public JSON", _fetch_from_reddit_public_json),
+    ]
+
+    async with aiohttp.ClientSession() as session:
+        for source_name, fetch_fn in sources:
+            try:
+                comments = await fetch_fn(session, username, max_comments)
+                if comments:
+                    break
+            except Exception:
+                continue
+
+    profile.recent_comments = comments
+    if comments:
+        profile.created_utc = min(c["created_utc"] for c in comments) - 86400 * 30
+        profile.comment_karma = sum(max(c["score"], 0) for c in comments)
+    else:
+        profile.history_hidden = True
+        profile.fetch_error = "no_comments_available_from_any_source"
+
     return profile
 
 

@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Reddit Bot Identifier</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      width: 280px;
+      padding: 16px;
+      background: #09090b;
+      color: #fafafa;
+    }
+    .header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 12px;
+      border-bottom: 1px solid #27272a;
+      padding-bottom: 10px;
+    }
+    .title {
+      font-size: 14px;
+      font-weight: 700;
+      letter-spacing: -0.01em;
+    }
+    .status-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 10px;
+      font-size: 12px;
+    }
+    .status-indicator {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-weight: 600;
+    }
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+    }
+    .dot-online {
+      background: #10b981;
+      box-shadow: 0 0 6px #10b981;
+    }
+    .dot-offline {
+      background: #ef4444;
+      box-shadow: 0 0 6px #ef4444;
+    }
+    .stat-box {
+      background: #18181b;
+      border: 1px solid #27272a;
+      border-radius: 8px;
+      padding: 10px;
+      text-align: center;
+      margin-bottom: 12px;
+    }
+    .stat-number {
+      font-size: 22px;
+      font-weight: 800;
+      color: #38bdf8;
+    }
+    .stat-label {
+      font-size: 10px;
+      color: #a1a1aa;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-top: 2px;
+    }
+    .legend {
+      display: flex;
+      justify-content: space-between;
+      font-size: 10px;
+      padding-top: 8px;
+      border-top: 1px solid #27272a;
+      color: #a1a1aa;
+    }
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .legend-box {
+      width: 10px;
+      height: 10px;
+      border-radius: 2px;
+    }
+    .info-footer {
+      margin-top: 12px;
+      font-size: 10px;
+      color: #71717a;
+      text-align: center;
+    }
+    code {
+      background: #27272a;
+      padding: 1px 4px;
+      border-radius: 3px;
+      color: #e4e4e7;
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <span style="font-size: 18px;">🤖</span>
+    <span class="title">Reddit Bot Identifier</span>
+  </div>
+
+  <div class="status-row">
+    <span style="color: #a1a1aa;">Backend API:</span>
+    <div class="status-indicator">
+      <div id="statusDot" class="dot dot-offline"></div>
+      <span id="statusText" style="color: #ef4444;">Checking...</span>
+    </div>
+  </div>
+
+  <div class="stat-box">
+    <div id="labeledCount" class="stat-number">—</div>
+    <div class="stat-label">Authors Labeled on Page</div>
+  </div>
+
+  <div class="legend">
+    <div class="legend-item">
+      <div class="legend-box" style="background: #10b981;"></div>
+      <span>Human</span>
+    </div>
+    <div class="legend-item">
+      <div class="legend-box" style="background: #f59e0b;"></div>
+      <span>Suspect</span>
+    </div>
+    <div class="legend-item">
+      <div class="legend-box" style="background: #ef4444;"></div>
+      <span>Bot</span>
+    </div>
+  </div>
+
+  <div class="info-footer">
+    Run <code>botid serve</code> to start the local backend.
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
+

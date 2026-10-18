@@ -160,6 +160,9 @@ def score_temporal(comments: list[dict]) -> TemporalScoreDetail:
         base_score = max(base_score, detail.burst_score * 0.90)
     if detail.dispersion_score >= 0.8:
         base_score = max(base_score, detail.dispersion_score * 0.85)
+    # If 24h activity is completely flat with no sleep trough over a healthy sample
+    if detail.circadian_score >= 0.88 and detail.sample_size >= 15:
+        base_score = max(base_score, detail.circadian_score * 0.75)
 
     detail.final_score = min(base_score, 1.0)
     return detail

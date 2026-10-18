@@ -136,6 +136,24 @@ python -m src.cli monitor
 python -m src.cli monitor --subreddits "AskReddit,memes,technology"
 ```
 
+### Scan an Entire Reddit Thread / Page
+```bash
+# Scan all commenters in a Reddit thread URL or submission ID
+python -m src.cli scan-page "https://www.reddit.com/r/technology/comments/1x8oiw0/..."
+```
+
+### Run Benchmark Suite
+```bash
+# Evaluate classifier against ground-truth bots and humans
+python -m src.cli benchmark
+```
+
+### Start API Server for Browser Extension
+```bash
+# Runs the local HTTP API on http://127.0.0.1:8000
+python -m src.cli serve
+```
+
 ### Inspect the Bot Database
 ```bash
 # List all identified BOTs and SUSPECTs
@@ -153,6 +171,17 @@ python -m src.cli stats
 python -m src.cli add-phrase "dm me for crypto signals" --type exact
 python -m src.cli add-phrase "look what arrived in the mail today" --type fuzzy
 ```
+
+---
+
+## 🌐 Chrome / Firefox Browser Extension
+
+The repository includes a ready-to-load browser extension located in [`extension/`](extension/):
+
+1. Start your local server: `python -m src.cli serve`
+2. Open your browser (`chrome://extensions` or `brave://extensions`) and turn on **Developer Mode**.
+3. Click **"Load unpacked"** and select the `/extension` folder.
+4. Browse Reddit — every user handle on the screen is dynamically analyzed with a color-coded glowing badge (Green = Human, Amber = Suspect, Neon Red = Bot) with full hover tooltips!
 
 ---
 

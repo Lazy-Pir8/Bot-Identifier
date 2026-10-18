@@ -99,20 +99,31 @@ async def analyze_user(
     )
     network_detail = await score_network(username, merged_comments)
 
-    # ── Step 4: Composite score ────────────────────────────────────────
-    # If history is hidden AND we have few comments, redistribute weights
-    # to avoid penalizing for missing temporal/network data.
+    # ── Step 4: Composite score with dynamic weight redistribution ─────
     w_meta = settings.WEIGHT_META
     w_temporal = settings.WEIGHT_TEMPORAL
     w_linguistic = settings.WEIGHT_LINGUISTIC
     w_network = settings.WEIGHT_NETWORK
 
+    has_network_data = (
+        network_detail.cooccurrence_score > 0
+        or network_detail.reply_pair_score > 0
+        or network_detail.known_bot_association > 0
+    )
+
     if profile.history_hidden and len(merged_comments) < 5:
-        # Lean harder on what we have: meta + linguistic (the triggering comment)
+        # History private and few observations: focus on observable signals
         w_meta = 0.40
         w_temporal = 0.05
         w_linguistic = 0.45
         w_network = 0.10
+    elif not has_network_data:
+        # Single-user scan without prior DB network graph: redistribute network weight
+        active_sum = w_meta + w_temporal + w_linguistic
+        w_meta = w_meta / active_sum
+        w_temporal = w_temporal / active_sum
+        w_linguistic = w_linguistic / active_sum
+        w_network = 0.0
 
     raw_score = (
         w_meta * meta_detail.final_score
@@ -120,29 +131,39 @@ async def analyze_user(
         + w_linguistic * linguistic_detail.final_score
         + w_network * network_detail.final_score
     )
-    bot_score = round(min(max(raw_score, 0.0), 1.0), 4)
+    bot_score = raw_score
 
-    # ── Non-linear Override Rules (Smoking Guns) ───────────────────────
-    # 1. Explicit bot disclaimer in comments (e.g. "I am a bot, and this action was performed automatically")
+    # ── Evidence Boost Overrides (Smooth Non-Linear Scaling) ───────────
+    # Replaces flat static clamps with continuous evidentiary Bayesian-style boosts
     has_self_identified_bot = any(
         "i am a bot" in m.phrase.lower() or "performed automatically" in m.phrase.lower()
         for m in linguistic_detail.matches
     )
-    # 2. Superhuman burst velocity (e.g. 90+ comments in 5 mins across 90 subreddits)
-    is_superhuman_burst = temporal_detail.burst_score >= 1.0 and temporal_detail.dispersion_score >= 0.8
-    # 3. Explicit bot name + active bot-like behavior
+    is_superhuman_burst = (
+        temporal_detail.burst_score >= 1.0 and temporal_detail.dispersion_score >= 0.8
+    )
+    is_template_bot = linguistic_detail.template_score >= 0.85
     is_bot_named = meta_detail.username_score >= 0.95 and (
-        temporal_detail.final_score > 0.3 or linguistic_detail.final_score > 0.3
+        temporal_detail.final_score > 0.25 or linguistic_detail.final_score > 0.25
     )
 
+    # Determine highest applicable boost factor
+    boost_factor = 0.0
     if has_self_identified_bot:
-        bot_score = max(bot_score, 0.98)
-        meta_detail.notes.append("Definitive: Account comments contain automated bot disclaimer")
-    elif is_superhuman_burst:
-        bot_score = max(bot_score, 0.92)
+        boost_factor = max(boost_factor, 0.85)
+        meta_detail.notes.append("Definitive: Automated bot disclaimer in comments")
+    if is_superhuman_burst:
+        boost_factor = max(boost_factor, 0.80)
         temporal_detail.notes.append("Definitive: Superhuman multi-subreddit burst velocity")
-    elif is_bot_named:
-        bot_score = max(bot_score, 0.85)
+    if is_template_bot:
+        boost_factor = max(boost_factor, 0.70)
+        linguistic_detail.notes.append("Definitive: Programmatic comment template repetition")
+    if is_bot_named:
+        boost_factor = max(boost_factor, 0.55)
+
+    if boost_factor > 0:
+        # Smooth boost: preserves score variance and component contributions
+        bot_score = raw_score + (1.0 - raw_score) * boost_factor
 
     bot_score = round(min(max(bot_score, 0.0), 1.0), 4)
     label = _apply_label(bot_score)

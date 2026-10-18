@@ -1,0 +1,33 @@
+{
+  "manifest_version": 3,
+  "name": "Reddit Bot Identifier",
+  "version": "1.0.0",
+  "description": "Real-time AI Reddit bot detection badges directly on reddit.com",
+  "permissions": [
+    "activeTab"
+  ],
+  "host_permissions": [
+    "*://*.reddit.com/*",
+    "http://127.0.0.1:8000/*",
+    "http://localhost:8000/*"
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Reddit Bot Identifier"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "*://*.reddit.com/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "css": [
+        "styles.css"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}
+

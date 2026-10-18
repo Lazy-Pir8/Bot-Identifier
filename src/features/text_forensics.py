@@ -55,6 +55,7 @@ class LinguisticScoreDetail:
     llm_tone_score: float = 0.0
     readability_score: float = 0.0
     generic_score: float = 0.0
+    template_score: float = 0.0
     final_score: float = 0.0
     matches: list[PhraseMatch] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
@@ -245,11 +246,58 @@ def score_linguistics(
             f"High proportion of generic short comments: {generic_count}/{len(all_bodies)}"
         )
 
+    # ── 5. Intra-user comment template self-similarity ───────────────
+    # Bots (like tippr, r2tg_bot, RemindMeBot, downloaders) repeatedly post
+    # comments with identical structural templates.
+    template_score = 0.0
+    if len(all_bodies) >= 3:
+        def _token_jaccard(t1: str, t2: str) -> float:
+            words1 = set(_normalize(t1).split())
+            words2 = set(_normalize(t2).split())
+            if not words1 or not words2:
+                return 0.0
+            return len(words1 & words2) / len(words1 | words2)
+
+        # Check adjacent pairs (up to 20)
+        pair_jaccards = []
+        sample_bodies = [b[0] for b in all_bodies[:25]]
+        for i in range(len(sample_bodies) - 1):
+            pair_jaccards.append(_token_jaccard(sample_bodies[i], sample_bodies[i + 1]))
+
+        if pair_jaccards:
+            avg_jaccard = sum(pair_jaccards) / len(pair_jaccards)
+            # Humans rarely exceed 0.20 average overlap across comments
+            if avg_jaccard >= 0.70:
+                template_score = 1.0
+                detail.notes.append(
+                    f"Extreme comment template self-similarity ({avg_jaccard * 100:.1f}% word overlap)"
+                )
+            elif avg_jaccard >= 0.45:
+                template_score = 0.85
+                detail.notes.append(
+                    f"High comment template self-similarity ({avg_jaccard * 100:.1f}% word overlap)"
+                )
+            elif avg_jaccard >= 0.30:
+                template_score = 0.50
+                detail.notes.append(
+                    f"Moderate comment template self-similarity ({avg_jaccard * 100:.1f}% word overlap)"
+                )
+    detail.template_score = template_score
+
     # ── Final weighted average for S_linguistic ────────────────────────
-    detail.final_score = (
-        0.40 * detail.phrase_score
-        + 0.25 * detail.llm_tone_score
-        + 0.20 * detail.readability_score
-        + 0.15 * detail.generic_score
+    base_linguistic = (
+        0.30 * detail.phrase_score
+        + 0.25 * detail.template_score
+        + 0.20 * detail.llm_tone_score
+        + 0.15 * detail.readability_score
+        + 0.10 * detail.generic_score
     )
+
+    # If template similarity or phrase match is very high, let it dominate
+    if detail.template_score >= 0.85:
+        base_linguistic = max(base_linguistic, detail.template_score * 0.90)
+    elif detail.phrase_score >= 0.80:
+        base_linguistic = max(base_linguistic, detail.phrase_score * 0.85)
+
+    detail.final_score = min(base_linguistic, 1.0)
     return detail

@@ -1,0 +1,148 @@
+/* ─── Reddit Bot Identifier Badge Styles ────────────────────────── */
+
+.rbi-badge-container {
+  display: inline-flex;
+  align-items: center;
+  position: relative;
+  margin-left: 6px;
+  vertical-align: middle;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  cursor: pointer;
+  user-select: none;
+}
+
+.rbi-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 6px;
+  border-radius: 9999px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #ffffff;
+  line-height: 14px;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.rbi-badge:hover {
+  transform: scale(1.08);
+}
+
+/* ─── Label Color Schemes & Brightness ────────────────────────────── */
+
+/* Human: Clean emerald / mint green */
+.rbi-label-human {
+  background: linear-gradient(135deg, #10b981, #059669);
+  box-shadow: 0 1px 3px rgba(16, 185, 129, 0.25);
+}
+
+/* Suspect: Amber / Gold */
+.rbi-label-suspect {
+  background: linear-gradient(135deg, #f59e0b, #d97706);
+  box-shadow: 0 1px 3px rgba(245, 158, 11, 0.35);
+}
+
+/* Bot: Crimson / Neon Red with dynamic pulse for high scores */
+.rbi-label-bot {
+  background: linear-gradient(135deg, #ef4444, #dc2626);
+  box-shadow: 0 1px 4px rgba(239, 68, 68, 0.45);
+}
+
+.rbi-high-bot {
+  background: linear-gradient(135deg, #ff1744, #d50000) !important;
+  box-shadow: 0 0 8px rgba(255, 23, 68, 0.7) !important;
+  animation: rbi-pulse 2s infinite ease-in-out;
+}
+
+@keyframes rbi-pulse {
+  0%, 100% {
+    box-shadow: 0 0 6px rgba(255, 23, 68, 0.5);
+  }
+  50% {
+    box-shadow: 0 0 12px rgba(255, 23, 68, 0.9);
+  }
+}
+
+/* ─── Tooltip Styling ──────────────────────────────────────────────── */
+
+.rbi-tooltip {
+  display: none;
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: #18181b;
+  color: #f4f4f5;
+  border: 1px solid #3f3f46;
+  border-radius: 8px;
+  padding: 10px 12px;
+  width: 230px;
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.4;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.6), 0 8px 10px -6px rgba(0, 0, 0, 0.4);
+  z-index: 999999;
+  pointer-events: none;
+  text-align: left;
+}
+
+.rbi-badge-container:hover .rbi-tooltip {
+  display: block;
+  animation: rbi-fade-in 0.15s ease-out;
+}
+
+@keyframes rbi-fade-in {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+}
+
+.rbi-tooltip-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+  padding-bottom: 5px;
+  border-bottom: 1px solid #27272a;
+}
+
+.rbi-tooltip-title {
+  font-weight: 700;
+  color: #ffffff;
+}
+
+.rbi-tooltip-score {
+  font-weight: 700;
+  font-size: 12px;
+}
+
+.rbi-tooltip-breakdown {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  margin-bottom: 6px;
+  color: #a1a1aa;
+}
+
+.rbi-tooltip-notes {
+  margin-top: 6px;
+  padding-top: 5px;
+  border-top: 1px dashed #27272a;
+  color: #e4e4e7;
+  font-size: 10px;
+}
+
+.rbi-tooltip-note-item {
+  margin-top: 2px;
+  display: flex;
+  align-items: flex-start;
+  gap: 3px;
+}
+
