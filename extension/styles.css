@@ -143,6 +143,24 @@
   font-size: 12px;
 }
 
+.rbi-tooltip-tier-row {
+  margin-top: -2px;
+  margin-bottom: 6px;
+}
+
+.rbi-tooltip-tier {
+  display: inline-block;
+  background: rgba(56, 189, 248, 0.12);
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  border-radius: 4px;
+  padding: 1px 6px;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  color: #38bdf8;
+  text-transform: uppercase;
+}
+
 .rbi-tooltip-breakdown {
   display: grid;
   grid-template-columns: 1fr 1fr;

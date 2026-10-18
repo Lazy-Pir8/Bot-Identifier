@@ -189,10 +189,44 @@ class TestTextForensics:
         assert detail.template_score >= 0.70, f"Template score should be high, got {detail.template_score}"
         assert detail.final_score >= 0.70, f"Final linguistic score should be high, got {detail.final_score}"
 
+    def test_subreddit_randomness_and_karma_farming(self):
+        now = time.time()
+        # High dispersion across 16 random unique subreddits including a karma farming sub
+        comments = [
+            {"created_utc": now - i * 60, "subreddit": f"random_sub_{i}", "body": "test"}
+            for i in range(16)
+        ]
+        comments.append({"created_utc": now, "subreddit": "FreeKarma4U", "body": "Upvoted! Please return"})
+        detail = score_temporal(comments)
+        assert detail.randomness_score >= 0.6, f"Expected high randomness score, got {detail.randomness_score}"
+        assert detail.karma_farm_score >= 0.9, f"Expected karma farm score >= 0.9, got {detail.karma_farm_score}"
+        assert any("Karma-farming" in n for n in detail.notes)
+
+
+# ─── Evidence Tier Tests ───────────────────────────────────────────────────────
+
+class TestEvidenceHierarchy:
+
+    def test_tier_constants_and_result_structure(self):
+        from src.models.bot_classifier import BotAnalysisResult
+        res = BotAnalysisResult(
+            username="AutoModerator",
+            bot_score=0.98,
+            label="BOT",
+            score_meta=0.1,
+            score_temporal=0.8,
+            score_linguistic=0.9,
+            score_network=0.0,
+            evidence_tier="TIER_1_DETERMINISTIC",
+        )
+        assert res.evidence_tier == "TIER_1_DETERMINISTIC"
+        assert res.bot_score == 0.98
+
 
 # ─── Run tests directly ────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     import subprocess
     subprocess.run(["python", "-m", "pytest", __file__, "-v"], cwd=str(Path(__file__).parent.parent))
+
 

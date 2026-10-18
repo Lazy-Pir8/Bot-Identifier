@@ -32,17 +32,19 @@ class BotAnalysisResult:
     score_temporal: float
     score_linguistic: float
     score_network: float
+    evidence_tier: str = "TIER_3_BEHAVIORAL_FORENSICS"  # TIER_1_DETERMINISTIC / TIER_2_COMMUNITY_WATCHLIST / TIER_3_BEHAVIORAL_FORENSICS
     meta_detail: Optional[MetaScoreDetail] = None
     temporal_detail: Optional[TemporalScoreDetail] = None
     linguistic_detail: Optional[LinguisticScoreDetail] = None
     network_detail: Optional[NetworkScoreDetail] = None
     history_hidden: bool = False
     trigger_comment: Optional[str] = None
+    custom_notes: list[str] = field(default_factory=list)
     analyzed_at: float = field(default_factory=time.time)
 
     @property
     def all_notes(self) -> list[str]:
-        notes = []
+        notes = list(self.custom_notes)
         for d in [self.meta_detail, self.temporal_detail,
                   self.linguistic_detail, self.network_detail]:
             if d and hasattr(d, 'notes'):
@@ -63,30 +65,136 @@ async def analyze_user(
     username: str,
     trigger_comment_body: Optional[str] = None,
     trigger_comment_id: Optional[str] = None,
+    bypass_watchlist: bool = False,
 ) -> BotAnalysisResult:
     """
-    Full pipeline: fetch → analyze → score → label → persist.
-
-    Steps:
-      1. Fetch Reddit profile via API
-      2. Supplement with comments stored in our DB (fills hidden history gap)
-      3. Run all 4 feature layers
-      4. Compute composite score with configurable weights
-      5. Save result to DB and return
+    Full 3-Tier Evidence Pipeline:
+      Tier 1: Deterministic Ground Truth (Disclaimers, superhuman burst)
+      Tier 2: Community Consensus & Watchlists (Instant O(1) resolution)
+      Tier 3: Multi-Layer Behavioral Forensics (Meta, Temporal, Linguistic, Network)
     """
-    # ── Step 1: Fetch from Reddit API ─────────────────────────────────
-    profile: RedditorProfile = await db_or_api_profile(username)
+    clean_username = username.replace("u/", "").strip()
 
-    # ── Step 2: Merge with DB-captured comments ───────────────────────
-    # Even if Reddit hides the history, we may have seen this user live before.
-    db_comments = await db.get_user_comments(username, limit=200)
+    # ── Tier 2: Check Community Watchlist Registry (O(1) Instant Resolution) ──
+    if not bypass_watchlist:
+        wl_entry = await db.get_watchlist_entry(clean_username)
+        if wl_entry:
+            wl_label = wl_entry["list_type"].upper()
+            wl_score = float(wl_entry["score"])
+            meta_s = 0.20 if wl_label == "BOT" else 0.04
+            temp_s = 0.85 if wl_label == "BOT" else 0.10
+            ling_s = 0.90 if wl_label == "BOT" else 0.04
+            result = BotAnalysisResult(
+                username=clean_username,
+                bot_score=wl_score,
+                label=wl_label,
+                evidence_tier="TIER_2_COMMUNITY_WATCHLIST",
+                score_meta=meta_s,
+                score_temporal=temp_s,
+                score_linguistic=ling_s,
+                score_network=0.0,
+                meta_detail=MetaScoreDetail(final_score=meta_s),
+                temporal_detail=TemporalScoreDetail(final_score=temp_s),
+                linguistic_detail=LinguisticScoreDetail(final_score=ling_s),
+                network_detail=NetworkScoreDetail(final_score=0.0),
+                history_hidden=False,
+                trigger_comment=trigger_comment_body,
+                custom_notes=[
+                    f"Tier 2: Community verified watchlist ({wl_entry.get('category', 'registry')})",
+                    wl_entry.get("notes") or ("Confirmed automated bot" if wl_label == "BOT" else "Confirmed human account")
+                ],
+            )
+            # Store visible comment if provided
+            if trigger_comment_body:
+                await db.save_comment(
+                    comment_id=trigger_comment_id or f"live_{int(time.time()*1000)}",
+                    username=clean_username,
+                    subreddit="current_page",
+                    body=trigger_comment_body,
+                    created_utc=time.time(),
+                    score=1,
+                    is_bot_phrase=(wl_label == "BOT"),
+                )
+            await db.upsert_user(
+                clean_username,
+                label=wl_label,
+                bot_score=wl_score,
+                score_meta=result.score_meta,
+                score_temporal=result.score_temporal,
+                score_linguistic=result.score_linguistic,
+                score_network=result.score_network,
+                last_analyzed=time.time(),
+                is_hidden=0,
+            )
+            return result
+
+    # ── Tier 1 Fast-Path: On-Page Visible Comment Bot Disclaimer Check ─────────
+    if trigger_comment_body:
+        norm_trigger = trigger_comment_body.lower()
+        if "i am a bot" in norm_trigger or "performed automatically" in norm_trigger:
+            result = BotAnalysisResult(
+                username=clean_username,
+                bot_score=0.98,
+                label="BOT",
+                evidence_tier="TIER_1_DETERMINISTIC",
+                score_meta=0.25,
+                score_temporal=0.85,
+                score_linguistic=1.0,
+                score_network=0.0,
+                meta_detail=MetaScoreDetail(final_score=0.25),
+                temporal_detail=TemporalScoreDetail(final_score=0.85),
+                linguistic_detail=LinguisticScoreDetail(final_score=1.0, phrase_score=1.0),
+                network_detail=NetworkScoreDetail(final_score=0.0),
+                history_hidden=False,
+                trigger_comment=trigger_comment_body,
+                custom_notes=["Tier 1: Definitive automated bot disclaimer detected in on-page comment"],
+            )
+            await db.save_comment(
+                comment_id=trigger_comment_id or f"live_{int(time.time()*1000)}",
+                username=clean_username,
+                subreddit="current_page",
+                body=trigger_comment_body,
+                created_utc=time.time(),
+                score=1,
+                is_bot_phrase=True,
+            )
+            await db.upsert_user(clean_username, label="BOT", bot_score=0.98, is_hidden=0)
+            return result
+
+    # ── Step 1: Fetch Profile from API / Public Archives ──────────────────────
+    profile: RedditorProfile = await db_or_api_profile(clean_username)
+
+    # ── Step 2: Merge with DB Comments + Current On-Page Visible Comment ──────
+    db_comments = await db.get_user_comments(clean_username, limit=200)
     api_comment_ids = {c["id"] for c in profile.recent_comments}
-    # Add DB comments that aren't already in the API response
     merged_comments = profile.recent_comments + [
         c for c in db_comments if c["id"] not in api_comment_ids
     ]
 
-    # ── Step 3: Run feature layers ─────────────────────────────────────
+    # Crucial: If current page has a visible comment, ensure it's in merged_comments
+    if trigger_comment_body:
+        cid = trigger_comment_id or f"onpage_{int(time.time()*1000)}"
+        if cid not in {c.get("id") for c in merged_comments}:
+            merged_comments.insert(0, {
+                "id": cid,
+                "body": trigger_comment_body,
+                "subreddit": "current_page",
+                "created_utc": time.time(),
+                "score": 1,
+                "permalink": "",
+                "submission_id": "",
+                "parent_id": "",
+            })
+            await db.save_comment(
+                comment_id=cid,
+                username=clean_username,
+                subreddit="current_page",
+                body=trigger_comment_body,
+                created_utc=time.time(),
+                score=1,
+            )
+
+    # ── Step 3: Run Tier 3 Feature Layers ─────────────────────────────────────
     last_seen = max(
         (c["created_utc"] for c in merged_comments), default=None
     )
@@ -97,9 +205,9 @@ async def analyze_user(
         new_comment_body=trigger_comment_body,
         new_comment_id=trigger_comment_id,
     )
-    network_detail = await score_network(username, merged_comments)
+    network_detail = await score_network(clean_username, merged_comments)
 
-    # ── Step 4: Composite score with dynamic weight redistribution ─────
+    # ── Step 4: Dynamic Weight Redistribution for Sparse / Hidden Profiles ───
     w_meta = settings.WEIGHT_META
     w_temporal = settings.WEIGHT_TEMPORAL
     w_linguistic = settings.WEIGHT_LINGUISTIC
@@ -112,13 +220,12 @@ async def analyze_user(
     )
 
     if profile.history_hidden and len(merged_comments) < 5:
-        # History private and few observations: focus on observable signals
+        # History private: heavily prioritize on-page observable comment text + metadata
         w_meta = 0.40
         w_temporal = 0.05
         w_linguistic = 0.45
         w_network = 0.10
     elif not has_network_data:
-        # Single-user scan without prior DB network graph: redistribute network weight
         active_sum = w_meta + w_temporal + w_linguistic
         w_meta = w_meta / active_sum
         w_temporal = w_temporal / active_sum
@@ -133,8 +240,9 @@ async def analyze_user(
     )
     bot_score = raw_score
 
-    # ── Evidence Boost Overrides (Smooth Non-Linear Scaling) ───────────
-    # Replaces flat static clamps with continuous evidentiary Bayesian-style boosts
+    # ── Tier 1 Deterministic Verification & Bayesian Boosts ───────────────────
+    evidence_tier = "TIER_3_BEHAVIORAL_FORENSICS"
+
     has_self_identified_bot = any(
         "i am a bot" in m.phrase.lower() or "performed automatically" in m.phrase.lower()
         for m in linguistic_detail.matches
@@ -147,14 +255,15 @@ async def analyze_user(
         temporal_detail.final_score > 0.25 or linguistic_detail.final_score > 0.25
     )
 
-    # Determine highest applicable boost factor
     boost_factor = 0.0
     if has_self_identified_bot:
         boost_factor = max(boost_factor, 0.85)
-        meta_detail.notes.append("Definitive: Automated bot disclaimer in comments")
+        evidence_tier = "TIER_1_DETERMINISTIC"
+        meta_detail.notes.append("Tier 1: Definitive automated bot disclaimer in comments")
     if is_superhuman_burst:
         boost_factor = max(boost_factor, 0.80)
-        temporal_detail.notes.append("Definitive: Superhuman multi-subreddit burst velocity")
+        evidence_tier = "TIER_1_DETERMINISTIC"
+        temporal_detail.notes.append("Tier 1: Definitive superhuman multi-subreddit burst velocity")
     if is_template_bot:
         boost_factor = max(boost_factor, 0.70)
         linguistic_detail.notes.append("Definitive: Programmatic comment template repetition")
@@ -162,16 +271,16 @@ async def analyze_user(
         boost_factor = max(boost_factor, 0.55)
 
     if boost_factor > 0:
-        # Smooth boost: preserves score variance and component contributions
         bot_score = raw_score + (1.0 - raw_score) * boost_factor
 
     bot_score = round(min(max(bot_score, 0.0), 1.0), 4)
     label = _apply_label(bot_score)
 
     result = BotAnalysisResult(
-        username=username,
+        username=clean_username,
         bot_score=bot_score,
         label=label,
+        evidence_tier=evidence_tier,
         score_meta=round(meta_detail.final_score, 4),
         score_temporal=round(temporal_detail.final_score, 4),
         score_linguistic=round(linguistic_detail.final_score, 4),

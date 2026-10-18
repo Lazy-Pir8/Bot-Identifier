@@ -249,30 +249,51 @@ async def audit_user(username: str, interactive: bool = True):
     ling = res.linguistic_detail
     net = res.network_detail
 
+    # Safe field accessors
+    tier_label = getattr(res, "evidence_tier", "TIER_3_BEHAVIORAL_FORENSICS")
+    meta_u = getattr(meta, "username_score", 0.0) if meta else 0.0
+    meta_d = getattr(meta, "dormancy_score", 0.0) if meta else 0.0
+    meta_k = getattr(meta, "karma_score", 0.0) if meta else 0.0
+
+    temp_s = getattr(temp, "sample_size", 0) if temp else 0
+    temp_c = getattr(temp, "circadian_score", 0.0) if temp else 0.0
+    temp_i = getattr(temp, "iat_score", 0.0) if temp else 0.0
+    temp_b = getattr(temp, "burst_score", 0.0) if temp else 0.0
+    temp_d = getattr(temp, "dispersion_score", 0.0) if temp else 0.0
+
+    ling_p = getattr(ling, "phrase_score", 0.0) if ling else 0.0
+    ling_m = len(getattr(ling, "matches", [])) if ling else 0
+    ling_t = getattr(ling, "template_score", 0.0) if ling else 0.0
+    ling_l = getattr(ling, "llm_tone_score", 0.0) if ling else 0.0
+    ling_r = getattr(ling, "readability_score", 0.0) if ling else 0.0
+
+    net_c = getattr(net, "cooccurrence_score", 0.0) if net else 0.0
+    net_r = getattr(net, "reply_pair_score", 0.0) if net else 0.0
+
     # Evidence Panel
     lines = [
-        f"[bold]Account:[/bold] u/{res.username}  │  [bold]Calculated Bot Probability:[/bold] [{color}][bold]{score_pct}% ({res.label})[/bold][/{color}]",
+        f"[bold]Account:[/bold] u/{res.username}  │  [bold]Bot Probability:[/bold] [{color}][bold]{score_pct}% ({res.label})[/bold][/{color}]  │  [cyan]{tier_label}[/cyan]",
         f"[dim]History Status: {'Hidden / Incomplete' if res.history_hidden else 'Public comments captured'}[/dim]\n",
         "[bold cyan]1. Account Metadata (S_meta):[/bold cyan]",
         f"   • Score: {res.score_meta:.3f}",
-        f"   • Username pattern score: {meta.username_score:.2f}",
-        f"   • Dormancy score: {meta.dormancy_score:.2f}  │  Karma asymmetry score: {meta.karma_score:.2f}",
+        f"   • Username pattern score: {meta_u:.2f}",
+        f"   • Dormancy score: {meta_d:.2f}  │  Karma asymmetry score: {meta_k:.2f}",
         "",
         "[bold cyan]2. Temporal & Posting Velocity (S_temporal):[/bold cyan]",
-        f"   • Score: {res.score_temporal:.3f}  (Sample size: {temp.sample_size if temp else 0} comments)",
-        f"   • Circadian uniformity: {temp.circadian_score:.3f} (1.0 = 24/7 robotic, 0.0 = human sleep trough)",
-        f"   • Regularity (IAT CV): {temp.iat_score:.3f}  │  Burst density: {temp.burst_score:.3f}",
-        f"   • Subreddit dispersion speed: {temp.dispersion_score:.3f}",
+        f"   • Score: {res.score_temporal:.3f}  (Sample size: {temp_s} comments)",
+        f"   • Circadian uniformity: {temp_c:.3f} (1.0 = 24/7 robotic, 0.0 = human sleep trough)",
+        f"   • Regularity (IAT CV): {temp_i:.3f}  │  Burst density: {temp_b:.3f}",
+        f"   • Subreddit dispersion speed: {temp_d:.3f}",
         "",
         "[bold cyan]3. Linguistic & Content Forensics (S_linguistic):[/bold cyan]",
         f"   • Score: {res.score_linguistic:.3f}",
-        f"   • Known bot phrase matches: {ling.phrase_score:.3f} ({len(ling.matches)} hits)",
-        f"   • Template repetition score: {ling.template_score:.3f} (word/structure overlap across comments)",
-        f"   • LLM stylometric tone score: {ling.llm_tone_score:.3f}  │  Readability variance: {ling.readability_score:.3f}",
+        f"   • Known bot phrase matches: {ling_p:.3f} ({ling_m} hits)",
+        f"   • Template repetition score: {ling_t:.3f} (word/structure overlap across comments)",
+        f"   • LLM stylometric tone score: {ling_l:.3f}  │  Readability variance: {ling_r:.3f}",
         "",
         "[bold cyan]4. Network Coordination (S_network):[/bold cyan]",
         f"   • Score: {res.score_network:.3f}",
-        f"   • Co-occurrence: {net.cooccurrence_score:.3f}  │  Reply pairs: {net.reply_pair_score:.3f}",
+        f"   • Co-occurrence: {net_c:.3f}  │  Reply pairs: {net_r:.3f}",
         "",
         "[bold yellow]Signals & Detections Flagged:[/bold yellow]",
     ]

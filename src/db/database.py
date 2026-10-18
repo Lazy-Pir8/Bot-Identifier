@@ -77,6 +77,7 @@ async def init_db() -> None:
             );
 
             -- ── Bot phrases (dynamic, from DB) ───────────────────────────
+            -- ── Bot phrases (dynamic, from DB) ───────────────────────────
             CREATE TABLE IF NOT EXISTS bot_phrases (
                 id              INTEGER PRIMARY KEY AUTOINCREMENT,
                 phrase          TEXT UNIQUE NOT NULL,
@@ -85,14 +86,30 @@ async def init_db() -> None:
                 hit_count       INTEGER DEFAULT 0
             );
 
-            -- ── Indexes ───────────────────────────────────────────────────
+            -- ── Tier 2 Community Watchlists (O(1) fast lookup) ────────────
+            CREATE TABLE IF NOT EXISTS watchlists (
+                username        TEXT PRIMARY KEY,
+                list_type       TEXT NOT NULL,           -- BOT / HUMAN
+                category        TEXT,
+                score           REAL NOT NULL,
+                notes           TEXT,
+                added_at        REAL NOT NULL
+            );
+
+            -- ── Indexes for sub-millisecond retrieval ─────────────────────
             CREATE INDEX IF NOT EXISTS idx_users_label ON users(label);
             CREATE INDEX IF NOT EXISTS idx_users_score ON users(bot_score DESC);
             CREATE INDEX IF NOT EXISTS idx_comments_user ON comments(username);
             CREATE INDEX IF NOT EXISTS idx_comments_created ON comments(created_utc);
+            CREATE INDEX IF NOT EXISTS idx_comments_sub ON comments(submission_id);
+            CREATE INDEX IF NOT EXISTS idx_comments_parent ON comments(parent_id);
             CREATE INDEX IF NOT EXISTS idx_analysis_user ON analysis_log(username);
+            CREATE INDEX IF NOT EXISTS idx_watchlists_type ON watchlists(list_type);
         """)
         await db.commit()
+
+    # Seed watchlists from data/watchlists.json if table is empty
+    await _seed_watchlists_from_file()
 
 
 # ── User Operations ────────────────────────────────────────────────────────────
@@ -258,4 +275,86 @@ async def increment_phrase_hit(phrase_id: int) -> None:
             (phrase_id,),
         )
         await db.commit()
+
+
+# ── Watchlist Operations (Tier 2 Community Consensus) ─────────────────────────
+
+WATCHLIST_FILE = Path(__file__).resolve().parents[2] / "data" / "watchlists.json"
+
+
+async def _seed_watchlists_from_file() -> None:
+    """Load default watchlists into SQLite table if table is empty."""
+    if not WATCHLIST_FILE.exists():
+        return
+    try:
+        with open(WATCHLIST_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+
+        bots = data.get("bots", {})
+        humans = data.get("humans", {})
+
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute("SELECT COUNT(*) FROM watchlists") as c:
+                row = await c.fetchone()
+                if row and row[0] > 0:
+                    return  # already seeded
+
+            now = time.time()
+            for uname, info in bots.items():
+                await db.execute(
+                    """INSERT OR REPLACE INTO watchlists (username, list_type, category, score, notes, added_at)
+                       VALUES (?, ?, ?, ?, ?, ?)""",
+                    (uname.lower().strip(), "BOT", info.get("category", "known_bot"), info.get("score", 0.92), info.get("notes", ""), now),
+                )
+            for uname, info in humans.items():
+                await db.execute(
+                    """INSERT OR REPLACE INTO watchlists (username, list_type, category, score, notes, added_at)
+                       VALUES (?, ?, ?, ?, ?, ?)""",
+                    (uname.lower().strip(), "HUMAN", info.get("category", "verified_human"), info.get("score", 0.08), info.get("notes", ""), now),
+                )
+            await db.commit()
+    except Exception:
+        pass
+
+
+async def get_watchlist_entry(username: str) -> Optional[dict]:
+    """Retrieve watchlist data for a user if registered (O(1) indexed)."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            "SELECT * FROM watchlists WHERE username = ?",
+            (username.lower().strip(),),
+        ) as cursor:
+            row = await cursor.fetchone()
+            return dict(row) if row else None
+
+
+async def upsert_watchlist_entry(
+    username: str,
+    list_type: str,
+    category: str = "custom",
+    score: float = 0.92,
+    notes: str = "",
+) -> None:
+    """Add or update an account in the Tier 2 watchlist."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            """INSERT OR REPLACE INTO watchlists (username, list_type, category, score, notes, added_at)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (username.lower().strip(), list_type.upper(), category, score, notes, time.time()),
+        )
+        await db.commit()
+
+
+async def load_all_watchlists() -> dict[str, dict]:
+    """Fetch all watchlists into an in-memory dictionary for O(1) lookups."""
+    result = {}
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT * FROM watchlists") as cursor:
+            rows = await cursor.fetchall()
+            for r in rows:
+                result[r["username"].lower()] = dict(r)
+    return result
+
 

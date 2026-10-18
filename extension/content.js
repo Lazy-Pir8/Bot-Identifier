@@ -26,10 +26,18 @@ function getOrCreateGlobalTooltip() {
   return globalTooltip;
 }
 
+function formatTierLabel(tier) {
+  if (tier === "TIER_1_DETERMINISTIC") return "Tier 1: Deterministic";
+  if (tier === "TIER_2_COMMUNITY_WATCHLIST") return "Tier 2: Watchlist";
+  if (tier === "TIER_3_BEHAVIORAL_FORENSICS") return "Tier 3: Forensics";
+  return "";
+}
+
 function showTooltip(badgeEl, data) {
   const tooltip = getOrCreateGlobalTooltip();
   const scorePct = Math.round((data.score || 0) * 100);
   const scores = data.scores || {};
+  const tierName = formatTierLabel(data.evidence_tier);
 
   let notesHtml = "";
   if (data.notes && data.notes.length > 0) {
@@ -40,11 +48,14 @@ function showTooltip(badgeEl, data) {
     `;
   }
 
+  const tierBadgeHtml = tierName ? `<span class="rbi-tooltip-tier">${escapeHtml(tierName)}</span>` : "";
+
   tooltip.innerHTML = `
     <div class="rbi-tooltip-header">
       <span class="rbi-tooltip-title">u/${escapeHtml(data.username)}</span>
       <span class="rbi-tooltip-score" style="color: ${data.color || '#fff'};">${scorePct}% Bot Likelihood</span>
     </div>
+    ${tierBadgeHtml ? `<div class="rbi-tooltip-tier-row">${tierBadgeHtml}</div>` : ""}
     <div class="rbi-tooltip-breakdown">
       <div>Meta: ${(scores.meta || 0).toFixed(2)}</div>
       <div>Temporal: ${(scores.temporal || 0).toFixed(2)}</div>
@@ -90,6 +101,48 @@ function hideTooltip() {
 }
 
 window.addEventListener("scroll", hideTooltip, { passive: true });
+
+/**
+ * Extract visible comment text on the current page.
+ * Crucial for immediate analysis when user's Reddit profile history is hidden.
+ */
+function extractCommentBody(element) {
+  const container = element.closest('shreddit-comment, div[data-testid="comment"], div.comment, tr.thing');
+  if (!container) return "";
+
+  // 1. Shreddit comment slot or rtjson content
+  const shredditBody = container.querySelector('[slot="comment"], div[id*="-comment-rtjson-content"]');
+  if (shredditBody && shredditBody.innerText.trim()) {
+    return shredditBody.innerText.trim();
+  }
+
+  // 2. data-testid="comment-body"
+  const testIdBody = container.querySelector('[data-testid="comment-body"], [data-testid="comment-body-wrapper"]');
+  if (testIdBody && testIdBody.innerText.trim()) {
+    return testIdBody.innerText.trim();
+  }
+
+  // 3. Old Reddit / markdown body
+  const mdBody = container.querySelector('.usertext-body, .md');
+  if (mdBody && mdBody.innerText.trim()) {
+    return mdBody.innerText.trim();
+  }
+
+  return "";
+}
+
+/**
+ * Extract comment ID on the current page if available
+ */
+function extractCommentId(element) {
+  const container = element.closest('shreddit-comment, div[data-testid="comment"], div.comment, tr.thing');
+  if (!container) return "";
+
+  if (container.getAttribute("thingid")) return container.getAttribute("thingid");
+  if (container.getAttribute("id")) return container.getAttribute("id");
+  if (container.dataset && container.dataset.fullname) return container.dataset.fullname;
+  return "";
+}
 
 /**
  * Extract clean Reddit username from a link or element
@@ -243,10 +296,22 @@ function scanAuthors() {
     // Strict validation: must be author name text, NOT an avatar or comment body mention
     if (!isValidAuthorElement(el, username)) return;
 
+    const commentBody = extractCommentBody(el);
+    const commentId = extractCommentId(el);
+
     if (!PENDING_QUEUE.has(username)) {
-      PENDING_QUEUE.set(username, []);
+      PENDING_QUEUE.set(username, {
+        elements: [],
+        commentBody: commentBody || "",
+        commentId: commentId || "",
+      });
     }
-    PENDING_QUEUE.get(username).push(el);
+    const entry = PENDING_QUEUE.get(username);
+    entry.elements.push(el);
+    if (!entry.commentBody && commentBody) {
+      entry.commentBody = commentBody;
+      entry.commentId = commentId;
+    }
     added++;
   });
 
@@ -269,19 +334,30 @@ function scheduleBatchFetch() {
 async function processBatchQueue() {
   if (PENDING_QUEUE.size === 0) return;
 
-  const currentBatch = Array.from(PENDING_QUEUE.keys()).slice(0, 40);
+  const currentEntries = Array.from(PENDING_QUEUE.entries()).slice(0, 40);
   const elementsToUpdate = new Map();
+  const usersPayload = [];
+  const usernamesPayload = [];
 
-  currentBatch.forEach((u) => {
-    elementsToUpdate.set(u, PENDING_QUEUE.get(u));
-    PENDING_QUEUE.delete(u);
+  currentEntries.forEach(([username, data]) => {
+    elementsToUpdate.set(username, data.elements);
+    usersPayload.push({
+      username: username,
+      comment_body: data.commentBody || "",
+      comment_id: data.commentId || "",
+    });
+    usernamesPayload.push(username);
+    PENDING_QUEUE.delete(username);
   });
 
   try {
     const resp = await fetch(`${API_SERVER}/api/scan-users`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ usernames: currentBatch }),
+      body: JSON.stringify({
+        users: usersPayload,
+        usernames: usernamesPayload,
+      }),
     });
 
     if (!resp.ok) return;

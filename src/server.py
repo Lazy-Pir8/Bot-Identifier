@@ -32,6 +32,7 @@ console = Console()
 # Key: username -> (timestamp, result_dict)
 _CACHE: Dict[str, tuple[float, Dict[str, Any]]] = {}
 CACHE_TTL = 3600  # 1 hour cache
+_WATCHLIST_MAP: Dict[str, Dict[str, Any]] = {}
 
 
 def _score_to_color(score: float, label: str = "") -> str:
@@ -59,6 +60,7 @@ def _format_result(res: BotAnalysisResult) -> Dict[str, Any]:
         "score": res.bot_score,
         "label": res.label,
         "color": color,
+        "evidence_tier": getattr(res, "evidence_tier", "TIER_3_BEHAVIORAL_FORENSICS"),
         "scores": {
             "meta": res.score_meta,
             "temporal": res.score_temporal,
@@ -142,33 +144,108 @@ async def handle_scan_single(request: web.Request) -> web.Response:
 
 
 async def handle_scan_batch(request: web.Request) -> web.Response:
-    """Analyze a batch of usernames in parallel."""
+    """
+    Analyze a batch of usernames in parallel with fast O(1) watchlist resolution
+    and on-page comment context extraction.
+    """
     try:
         payload = await request.json()
     except Exception:
         return web.json_response({"error": "Invalid JSON payload"}, status=400)
 
-    usernames = payload.get("usernames", [])
-    if not isinstance(usernames, list):
-        return web.json_response({"error": "usernames must be an array of strings"}, status=400)
+    # Support rich objects {"users": [{"username": "...", "comment_body": "...", "comment_id": "..."}]}
+    # as well as legacy strings {"usernames": ["..."]}
+    raw_users = payload.get("users", [])
+    raw_usernames = payload.get("usernames", [])
 
-    # Sanitize and deduplicate
-    clean_users = list(dict.fromkeys(
-        u.replace("u/", "").strip() for u in usernames if isinstance(u, str) and u.strip()
-    ))[:50]  # Cap at 50 per batch
+    user_meta: Dict[str, Dict[str, str]] = {}
+    if isinstance(raw_users, list) and raw_users:
+        for item in raw_users:
+            if isinstance(item, dict) and item.get("username"):
+                uname = item["username"].replace("u/", "").strip()
+                user_meta[uname] = {
+                    "comment_body": item.get("comment_body", ""),
+                    "comment_id": item.get("comment_id", ""),
+                }
+    elif isinstance(raw_usernames, list):
+        for u in raw_usernames:
+            if isinstance(u, str) and u.strip():
+                uname = u.replace("u/", "").strip()
+                user_meta[uname] = {"comment_body": "", "comment_id": ""}
 
+    clean_users = list(user_meta.keys())[:50]  # Cap at 50 per batch
     now = time.time()
     results: Dict[str, Any] = {}
     users_to_fetch = []
 
-    # 1. Immediate resolution from Memory Cache
+    # Ensure watchlist map is loaded
+    global _WATCHLIST_MAP
+    if not _WATCHLIST_MAP:
+        try:
+            _WATCHLIST_MAP = await db.load_all_watchlists()
+        except Exception:
+            _WATCHLIST_MAP = {}
+
     for u in clean_users:
+        u_lower = u.lower()
+        info = user_meta[u]
+        body = info.get("comment_body", "")
+
+        # ── Fast Step 1: In-memory LRU cache (<0.1ms) ────────────────────────
         if u in _CACHE and (now - _CACHE[u][0]) < CACHE_TTL:
             results[u] = _CACHE[u][1]
-        else:
-            users_to_fetch.append(u)
+            continue
 
-    # 2. Check SQLite DB for remaining
+        # ── Fast Step 2: Tier 2 Community Watchlists (O(1) Instant Resolution)
+        if u_lower in _WATCHLIST_MAP:
+            wl = _WATCHLIST_MAP[u_lower]
+            wl_label = wl["list_type"].upper()
+            wl_score = float(wl["score"])
+            formatted = {
+                "username": u,
+                "score": wl_score,
+                "label": wl_label,
+                "color": _score_to_color(wl_score, wl_label),
+                "evidence_tier": "TIER_2_COMMUNITY_WATCHLIST",
+                "scores": {
+                    "meta": 0.20 if wl_label == "BOT" else 0.04,
+                    "temporal": 0.85 if wl_label == "BOT" else 0.10,
+                    "linguistic": 0.90 if wl_label == "BOT" else 0.04,
+                    "network": 0.0,
+                },
+                "notes": [
+                    f"Tier 2: Community verified watchlist ({wl.get('category', 'registry')})",
+                    wl.get("notes") or ("Confirmed automated bot" if wl_label == "BOT" else "Confirmed human account")
+                ],
+                "history_hidden": False,
+                "timestamp": now,
+            }
+            results[u] = formatted
+            _CACHE[u] = (now, formatted)
+            continue
+
+        # ── Fast Step 3: Tier 1 Visible On-Page Comment Bot Disclaimer Check ──
+        if body:
+            norm_body = body.lower()
+            if "i am a bot" in norm_body or "performed automatically" in norm_body:
+                formatted = {
+                    "username": u,
+                    "score": 0.98,
+                    "label": "BOT",
+                    "color": _score_to_color(0.98, "BOT"),
+                    "evidence_tier": "TIER_1_DETERMINISTIC",
+                    "scores": {"meta": 0.25, "temporal": 0.85, "linguistic": 1.0, "network": 0.0},
+                    "notes": ["Tier 1: Definitive automated bot disclaimer detected on current page"],
+                    "history_hidden": False,
+                    "timestamp": now,
+                }
+                results[u] = formatted
+                _CACHE[u] = (now, formatted)
+                continue
+
+        users_to_fetch.append(u)
+
+    # ── Step 4: Check SQLite DB for remaining users (sub-millisecond indexed) ─
     remaining = []
     for u in users_to_fetch:
         existing = await db.get_user(u)
@@ -178,6 +255,7 @@ async def handle_scan_batch(request: web.Request) -> web.Response:
                 "score": existing["bot_score"],
                 "label": existing["label"],
                 "color": _score_to_color(existing["bot_score"], existing["label"]),
+                "evidence_tier": "TIER_3_BEHAVIORAL_FORENSICS",
                 "scores": {
                     "meta": existing.get("score_meta", 0),
                     "temporal": existing.get("score_temporal", 0),
@@ -193,19 +271,31 @@ async def handle_scan_batch(request: web.Request) -> web.Response:
         else:
             remaining.append(u)
 
-    # 3. Analyze remaining concurrently (concurrency limited to 5 to protect rate limits)
+    # ── Step 5: Parallel bounded analysis for remaining uncached users ────────
     if remaining:
         sem = asyncio.Semaphore(5)
 
         async def _bounded_analyze(uname: str):
             async with sem:
                 try:
-                    res = await analyze_user(uname)
+                    meta = user_meta.get(uname, {})
+                    res = await analyze_user(
+                        uname,
+                        trigger_comment_body=meta.get("comment_body"),
+                        trigger_comment_id=meta.get("comment_id"),
+                    )
                     formatted = _format_result(res)
                     _CACHE[uname] = (time.time(), formatted)
                     return uname, formatted
                 except Exception as e:
-                    return uname, {"username": uname, "error": str(e), "score": 0.0, "label": "UNKNOWN"}
+                    return uname, {
+                        "username": uname,
+                        "error": str(e),
+                        "score": 0.0,
+                        "label": "UNKNOWN",
+                        "color": "#10b981",
+                        "evidence_tier": "UNKNOWN",
+                    }
 
         tasks = [_bounded_analyze(u) for u in remaining]
         batch_out = await asyncio.gather(*tasks)
@@ -225,12 +315,18 @@ def make_app() -> web.Application:
 
 def start_server(host: str = "127.0.0.1", port: int = 8000) -> None:
     """Run the API server synchronously."""
-    asyncio.run(db.init_db())
+    global _WATCHLIST_MAP
+
+    async def _init():
+        await db.init_db()
+        return await db.load_all_watchlists()
+
+    _WATCHLIST_MAP = asyncio.run(_init())
     app = make_app()
     console.print(
         f"[bold green]Starting Reddit Bot Identifier Local API Server...[/bold green]\n"
         f"URL: [cyan]http://{host}:{port}[/cyan]\n"
-        f"API status: [cyan]http://{host}:{port}/api/status[/cyan]\n"
+        f"Tier 2 Watchlists: [bold cyan]{len(_WATCHLIST_MAP)}[/bold cyan] accounts pre-loaded for instant O(1) lookups\n"
         f"Browser Extension Ready! (Press Ctrl+C to stop)"
     )
     web.run_app(app, host=host, port=port, print=None)

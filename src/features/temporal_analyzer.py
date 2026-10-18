@@ -16,12 +16,21 @@ from collections import Counter
 import numpy as np
 
 
+KARMA_FARM_SUBREDDITS = {
+    "freekarma4u", "karma4free", "freekarma4all", "boostmykarma",
+    "freekarma", "getfrekarma", "needkarma", "free_karma", "freekarmaruns",
+    "upvote4upvote", "karmafarm", "karma4karma"
+}
+
+
 @dataclass
 class TemporalScoreDetail:
     circadian_score: float = 0.0
     iat_score: float = 0.0
     burst_score: float = 0.0
     dispersion_score: float = 0.0
+    randomness_score: float = 0.0
+    karma_farm_score: float = 0.0
     final_score: float = 0.0
     notes: list[str] = field(default_factory=list)
     sample_size: int = 0
@@ -147,13 +156,51 @@ def score_temporal(comments: list[dict]) -> TemporalScoreDetail:
             dispersion_score = 0.45
     detail.dispersion_score = dispersion_score
 
+    # ── 5. Subreddit Randomness & Topical Coherence ──────────────────
+    subs = [c.get("subreddit", "").lower() for c in comments if c.get("subreddit")]
+    if len(subs) >= 5:
+        # Karma-farming subreddits check
+        farm_hits = set(subs).intersection(KARMA_FARM_SUBREDDITS)
+        if farm_hits:
+            detail.karma_farm_score = 0.95
+            detail.notes.append(
+                f"Karma-farming subreddit activity detected: r/{', r/'.join(sorted(farm_hits))}"
+            )
+
+        # Subreddit diversity ratio: unique subreddits / total comments
+        unique_subs = set(subs)
+        diversity_ratio = len(unique_subs) / len(subs)
+
+        # Normalized Shannon entropy of subreddit distribution
+        sub_counts = list(Counter(subs).values())
+        sub_entropy = _shannon_entropy(sub_counts)
+        max_sub_entropy = math.log2(len(unique_subs)) if len(unique_subs) > 1 else 1.0
+        entropy_ratio = sub_entropy / max_sub_entropy if max_sub_entropy > 0 else 0.0
+
+        # Highly scattered posting: posting across random, unrelated subreddits without returning to core communities
+        if diversity_ratio >= 0.80 and len(subs) >= 6:
+            detail.randomness_score = min(entropy_ratio * 0.90, 1.0)
+            detail.notes.append(
+                f"High subreddit randomness: {len(unique_subs)} unique subreddits in {len(subs)} comments ({diversity_ratio*100:.0f}% scatter)"
+            )
+        elif diversity_ratio >= 0.50 and len(subs) >= 6:
+            detail.randomness_score = min(entropy_ratio * 0.65, 1.0)
+            detail.notes.append(
+                f"Moderate subreddit scatter: {len(unique_subs)} unique subreddits in {len(subs)} comments ({diversity_ratio*100:.0f}% scatter)"
+            )
+
     # ── Final score for S_temporal ─────────────────────────────────────
     base_score = (
-        0.35 * detail.circadian_score
-        + 0.30 * detail.iat_score
-        + 0.20 * detail.burst_score
+        0.30 * detail.circadian_score
+        + 0.25 * detail.iat_score
+        + 0.15 * detail.burst_score
         + 0.15 * detail.dispersion_score
+        + 0.15 * detail.randomness_score
     )
+    # If karma-farming activity detected, impose strong penalty
+    if detail.karma_farm_score > 0:
+        base_score = max(base_score, detail.karma_farm_score * 0.85)
+
     # If burst velocity or multi-subreddit dispersion is superhuman,
     # don't allow lack of circadian data in a short sample to dilute it
     if detail.burst_score >= 0.8:

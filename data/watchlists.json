@@ -1,0 +1,139 @@
+{
+  "description": "Curated Tier 2 Community Consensus and Watchlist registry for instant O(1) resolution",
+  "version": "1.0",
+  "updated_at": "2026-10-18",
+  "bots": {
+    "automoderator": {
+      "category": "official_moderator_bot",
+      "score": 0.98,
+      "notes": "Reddit official auto-moderator"
+    },
+    "remindmebot": {
+      "category": "utility_summon_bot",
+      "score": 0.95,
+      "notes": "Reddit reminder utility bot"
+    },
+    "tippr": {
+      "category": "crypto_tipping_bot",
+      "score": 0.90,
+      "notes": "Cryptocurrency tipping and balance bot"
+    },
+    "r2tg_bot": {
+      "category": "media_downloader_bot",
+      "score": 0.92,
+      "notes": "Reddit to Telegram media bridge"
+    },
+    "haikusbot": {
+      "category": "entertainment_bot",
+      "score": 0.90,
+      "notes": "Haiku syllable counter and formatter bot"
+    },
+    "wikitextbot": {
+      "category": "utility_scraper_bot",
+      "score": 0.88,
+      "notes": "Wikipedia article introductory summary scraper"
+    },
+    "sneakpeekbot": {
+      "category": "utility_scraper_bot",
+      "score": 0.88,
+      "notes": "Subreddit preview generator bot"
+    },
+    "auddbot": {
+      "category": "audio_recognition_bot",
+      "score": 0.92,
+      "notes": "Music and audio recognition bot"
+    },
+    "alphabet_order_bot": {
+      "category": "entertainment_bot",
+      "score": 0.89,
+      "notes": "Alphabetical order word detection bot"
+    },
+    "converter-bot": {
+      "category": "unit_converter_bot",
+      "score": 0.88,
+      "notes": "Metric and imperial unit conversion bot"
+    },
+    "savevideobot": {
+      "category": "media_downloader_bot",
+      "score": 0.94,
+      "notes": "Video download link generator bot"
+    },
+    "savevideo": {
+      "category": "media_downloader_bot",
+      "score": 0.94,
+      "notes": "Video download mirror bot"
+    },
+    "repostsleuthbot": {
+      "category": "moderation_utility_bot",
+      "score": 0.95,
+      "notes": "Image and submission repost detector bot"
+    },
+    "bot-sleuth-bot": {
+      "category": "bot_identifier_bot",
+      "score": 0.92,
+      "notes": "Crowdsourced bot detection bot"
+    },
+    "shakespeare-bot": {
+      "category": "entertainment_bot",
+      "score": 0.90,
+      "notes": "Shakespearean syntax paraphrasing bot"
+    },
+    "profanitycounter": {
+      "category": "utility_analytics_bot",
+      "score": 0.91,
+      "notes": "User profanity count scanner bot"
+    },
+    "dadbot_2": {
+      "category": "entertainment_bot",
+      "score": 0.88,
+      "notes": "Dad joke summon bot"
+    },
+    "eyebleacherbot": {
+      "category": "utility_scraper_bot",
+      "score": 0.89,
+      "notes": "Cute image provider for eyebleach requests"
+    }
+  },
+  "humans": {
+    "spez": {
+      "category": "admin_founder_human",
+      "score": 0.08,
+      "notes": "Steve Huffman - Reddit CEO and co-founder"
+    },
+    "kn0thing": {
+      "category": "admin_founder_human",
+      "score": 0.08,
+      "notes": "Alexis Ohanian - Reddit co-founder"
+    },
+    "govschwarzenegger": {
+      "category": "verified_celebrity_human",
+      "score": 0.06,
+      "notes": "Arnold Schwarzenegger - Verified official account"
+    },
+    "poem_for_your_sprog": {
+      "category": "creative_novelty_human",
+      "score": 0.10,
+      "notes": "Famous original human poet"
+    },
+    "shittymorph": {
+      "category": "novelty_human",
+      "score": 0.12,
+      "notes": "Human novelty account known for nineteen ninety eight undertaker jokes"
+    },
+    "thisisbillgates": {
+      "category": "verified_celebrity_human",
+      "score": 0.07,
+      "notes": "Bill Gates - Verified official account"
+    },
+    "wil": {
+      "category": "verified_celebrity_human",
+      "score": 0.09,
+      "notes": "Wil Wheaton - Verified actor account"
+    },
+    "presidentobama": {
+      "category": "verified_celebrity_human",
+      "score": 0.05,
+      "notes": "Barack Obama - Verified official account"
+    }
+  }
+}
