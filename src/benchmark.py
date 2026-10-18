@@ -270,6 +270,11 @@ async def audit_user(username: str, interactive: bool = True):
     net_c = getattr(net, "cooccurrence_score", 0.0) if net else 0.0
     net_r = getattr(net, "reply_pair_score", 0.0) if net else 0.0
 
+    temp_m = getattr(temp, "monomania_score", 0.0) if temp else 0.0
+    temp_p = getattr(temp, "propaganda_risk_score", 0.0) if temp else 0.0
+    temp_shift = getattr(temp, "shift_pattern_score", 0.0) if temp else 0.0
+    dyn_w = getattr(res, "dynamic_weights", None)
+
     # Evidence Panel
     lines = [
         f"[bold]Account:[/bold] u/{res.username}  │  [bold]Bot Probability:[/bold] [{color}][bold]{score_pct}% ({res.label})[/bold][/{color}]  │  [cyan]{tier_label}[/cyan]",
@@ -283,7 +288,8 @@ async def audit_user(username: str, interactive: bool = True):
         f"   • Score: {res.score_temporal:.3f}  (Sample size: {temp_s} comments)",
         f"   • Circadian uniformity: {temp_c:.3f} (1.0 = 24/7 robotic, 0.0 = human sleep trough)",
         f"   • Regularity (IAT CV): {temp_i:.3f}  │  Burst density: {temp_b:.3f}",
-        f"   • Subreddit dispersion speed: {temp_d:.3f}",
+        f"   • Subreddit dispersion speed: {temp_d:.3f}  │  Scatter/Monomania: {getattr(temp, 'randomness_score', 0.0):.2f}/{temp_m:.2f}",
+        f"   • Propaganda/Astroturf risk: {temp_p:.3f}  │  Shift pattern/24-7 score: {temp_shift:.3f}",
         "",
         "[bold cyan]3. Linguistic & Content Forensics (S_linguistic):[/bold cyan]",
         f"   • Score: {res.score_linguistic:.3f}",
@@ -294,9 +300,16 @@ async def audit_user(username: str, interactive: bool = True):
         "[bold cyan]4. Network Coordination (S_network):[/bold cyan]",
         f"   • Score: {res.score_network:.3f}",
         f"   • Co-occurrence: {net_c:.3f}  │  Reply pairs: {net_r:.3f}",
-        "",
-        "[bold yellow]Signals & Detections Flagged:[/bold yellow]",
     ]
+
+    if dyn_w:
+        lines.append(
+            f"\n[bold magenta]Dynamic Weight Distribution:[/bold magenta] "
+            f"w_meta={dyn_w.get('meta', 0):.2f} │ w_temporal={dyn_w.get('temporal', 0):.2f} │ "
+            f"w_linguistic={dyn_w.get('linguistic', 0):.2f} │ w_network={dyn_w.get('network', 0):.2f}"
+        )
+
+    lines.append("\n[bold yellow]Signals & Detections Flagged:[/bold yellow]")
 
     if res.all_notes:
         for n in res.all_notes:

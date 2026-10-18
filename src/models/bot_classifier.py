@@ -38,8 +38,10 @@ class BotAnalysisResult:
     linguistic_detail: Optional[LinguisticScoreDetail] = None
     network_detail: Optional[NetworkScoreDetail] = None
     history_hidden: bool = False
+    history_recovered_via_osint: bool = False
     trigger_comment: Optional[str] = None
     custom_notes: list[str] = field(default_factory=list)
+    dynamic_weights: Optional[dict[str, float]] = None
     analyzed_at: float = field(default_factory=time.time)
 
     @property
@@ -59,6 +61,121 @@ def _apply_label(score: float) -> str:
         return "SUSPECT"
     else:
         return "HUMAN"
+
+
+def compute_dynamic_weights(
+    meta_detail: MetaScoreDetail,
+    temporal_detail: TemporalScoreDetail,
+    linguistic_detail: LinguisticScoreDetail,
+    network_detail: NetworkScoreDetail,
+    history_hidden: bool,
+    comment_count: int,
+) -> tuple[float, float, float, float, list[str]]:
+    """
+    Context-Aware Dynamic Weighting Engine.
+
+    Dynamically adjusts factor weights based on the observed anomaly profile:
+      1. Linguistic Decoupling: When text is clean/human-like (LLM generated or
+         human-assisted spam/troll farms) but temporal, metadata, or network
+         indicators are distinctly anomalous, the text weight is slashed so
+         natural grammar cannot shield bot behavior.
+      2. Monomania / Agenda / Political Propaganda: Hyper-focus on single subreddits
+         or political conflict clusters boosts temporal and metadata weighting.
+      3. Subreddit Scatter: High entropy / random posting boosts temporal velocity weights.
+      4. Sleep Trough Absence: 24/7 continuous activity elevates temporal weight.
+      5. Coordinated Networks: High co-occurrence or reply clustering elevates network weight.
+      6. Data Sparsity: Sparse or hidden history shifts weight to observable metadata + text.
+      7. Missing Network Data: Zeroed network weight is redistributed proportionally.
+    """
+    w_meta = settings.WEIGHT_META          # default 0.25
+    w_temporal = settings.WEIGHT_TEMPORAL  # default 0.25
+    w_linguistic = settings.WEIGHT_LINGUISTIC # default 0.30
+    w_network = settings.WEIGHT_NETWORK    # default 0.20
+    dynamic_notes: list[str] = []
+
+    has_network_data = (
+        network_detail.cooccurrence_score > 0
+        or network_detail.reply_pair_score > 0
+        or network_detail.known_bot_association > 0
+    )
+
+    # 1. Sparse / Hidden History Handling
+    if history_hidden and comment_count < 5:
+        w_meta = 0.40
+        w_temporal = 0.05
+        w_linguistic = 0.45
+        w_network = 0.10 if has_network_data else 0.0
+        dynamic_notes.append("Dynamic weighting: sparse history, prioritizing observable text forensics & metadata")
+        s = w_meta + w_temporal + w_linguistic + w_network
+        return round(w_meta / s, 4), round(w_temporal / s, 4), round(w_linguistic / s, 4), round(w_network / s, 4), dynamic_notes
+
+    # 2. Linguistic Decoupling (The "Clean Grammar" Bot & Human Astroturfer Shield Breaker)
+    # When text scores very low (natural English), but metadata or temporal flags are distinctly anomalous
+    s_ling = linguistic_detail.final_score
+    s_temp = temporal_detail.final_score
+    s_meta = meta_detail.final_score
+    s_net = network_detail.final_score
+    non_ling_max = max(s_temp, s_meta, s_net)
+
+    if s_ling < 0.25 and non_ling_max >= 0.50:
+        # Natural text, but behavioral timeline or account origin screams bot/spammer/sleeper
+        w_linguistic = 0.08
+        w_temporal = 0.45
+        w_meta = 0.32
+        w_network = 0.15 if has_network_data else 0.0
+        dynamic_notes.append(
+            "Dynamic weighting: linguistic decoupling applied (natural text with anomalous temporal/metadata signals)"
+        )
+    else:
+        # 3. Monomania & Political / Astroturfing Cluster Boost
+        if temporal_detail.monomania_score >= 0.60 or temporal_detail.propaganda_risk_score >= 0.60:
+            w_temporal += 0.12
+            w_meta += 0.08
+            w_linguistic = max(w_linguistic - 0.15, 0.10)
+            dynamic_notes.append(
+                "Dynamic weighting: agenda/propaganda focus adjustment (elevated weight on timeline & community monomania)"
+            )
+
+        # 4. High Subreddit Randomness / Scatter Crawler
+        elif temporal_detail.randomness_score >= 0.65:
+            w_temporal += 0.10
+            w_meta += 0.05
+            w_linguistic = max(w_linguistic - 0.10, 0.12)
+            dynamic_notes.append(
+                "Dynamic weighting: subreddit scatter adjustment (elevated weight on multi-sub dispersion dynamics)"
+            )
+
+        # 5. Sleep Trough Absence / Superhuman 24-7 Activity
+        if temporal_detail.shift_pattern_score >= 0.65:
+            w_temporal += 0.10
+            w_linguistic = max(w_linguistic - 0.08, 0.10)
+            dynamic_notes.append(
+                "Dynamic weighting: 24/7 activity adjustment (elevated weight on circadian rhythm and rest gaps)"
+            )
+
+        # 6. Coordinated Network Astroturfing Ring
+        if s_net >= 0.50 and has_network_data:
+            w_network += 0.15
+            w_linguistic = max(w_linguistic - 0.10, 0.10)
+            dynamic_notes.append(
+                "Dynamic weighting: coordination ring adjustment (elevated weight on co-occurrence & reply patterns)"
+            )
+
+    # 7. Absence of Network Data Redistribution
+    if not has_network_data:
+        w_network = 0.0
+
+    # 8. Strict Normalization to 1.0
+    total = w_meta + w_temporal + w_linguistic + w_network
+    if total > 0:
+        w_meta /= total
+        w_temporal /= total
+        w_linguistic /= total
+        w_network /= total
+    else:
+        w_meta, w_temporal, w_linguistic, w_network = 0.25, 0.25, 0.30, 0.20
+
+    return round(w_meta, 4), round(w_temporal, 4), round(w_linguistic, 4), round(w_network, 4), dynamic_notes
 
 
 async def analyze_user(
@@ -164,17 +281,30 @@ async def analyze_user(
     # ── Step 1: Fetch Profile from API / Public Archives ──────────────────────
     profile: RedditorProfile = await db_or_api_profile(clean_username)
 
-    # ── Step 2: Merge with DB Comments + Current On-Page Visible Comment ──────
+    # ── Step 2: Merge with DB Comments + Recovered Posts + Current On-Page Visible Comment
     db_comments = await db.get_user_comments(clean_username, limit=200)
     api_comment_ids = {c["id"] for c in profile.recent_comments}
     merged_comments = profile.recent_comments + [
         c for c in db_comments if c["id"] not in api_comment_ids
     ]
 
+    # Merge posts retrieved from profile / OSINT archives
+    known_ids = {c["id"] for c in merged_comments}
+    for p in profile.recent_posts:
+        if p["id"] not in known_ids:
+            merged_comments.append(p)
+            known_ids.add(p["id"])
+
+    custom_notes: list[str] = []
+    if profile.history_recovered_via_osint:
+        custom_notes.append(
+            f"OSINT Recovery: {len(profile.recent_comments)} comments & {len(profile.recent_posts)} posts retrieved via public archives ({profile.archive_source or 'multi-archive'})"
+        )
+
     # Crucial: If current page has a visible comment, ensure it's in merged_comments
     if trigger_comment_body:
         cid = trigger_comment_id or f"onpage_{int(time.time()*1000)}"
-        if cid not in {c.get("id") for c in merged_comments}:
+        if cid not in known_ids:
             merged_comments.insert(0, {
                 "id": cid,
                 "body": trigger_comment_body,
@@ -185,6 +315,7 @@ async def analyze_user(
                 "submission_id": "",
                 "parent_id": "",
             })
+            known_ids.add(cid)
             await db.save_comment(
                 comment_id=cid,
                 username=clean_username,
@@ -207,30 +338,16 @@ async def analyze_user(
     )
     network_detail = await score_network(clean_username, merged_comments)
 
-    # ── Step 4: Dynamic Weight Redistribution for Sparse / Hidden Profiles ───
-    w_meta = settings.WEIGHT_META
-    w_temporal = settings.WEIGHT_TEMPORAL
-    w_linguistic = settings.WEIGHT_LINGUISTIC
-    w_network = settings.WEIGHT_NETWORK
-
-    has_network_data = (
-        network_detail.cooccurrence_score > 0
-        or network_detail.reply_pair_score > 0
-        or network_detail.known_bot_association > 0
+    # ── Step 4: Context-Aware Dynamic Weight Redistribution ───────────────────
+    w_meta, w_temporal, w_linguistic, w_network, dyn_notes = compute_dynamic_weights(
+        meta_detail=meta_detail,
+        temporal_detail=temporal_detail,
+        linguistic_detail=linguistic_detail,
+        network_detail=network_detail,
+        history_hidden=profile.history_hidden,
+        comment_count=len(merged_comments),
     )
-
-    if profile.history_hidden and len(merged_comments) < 5:
-        # History private: heavily prioritize on-page observable comment text + metadata
-        w_meta = 0.40
-        w_temporal = 0.05
-        w_linguistic = 0.45
-        w_network = 0.10
-    elif not has_network_data:
-        active_sum = w_meta + w_temporal + w_linguistic
-        w_meta = w_meta / active_sum
-        w_temporal = w_temporal / active_sum
-        w_linguistic = w_linguistic / active_sum
-        w_network = 0.0
+    custom_notes.extend(dyn_notes)
 
     raw_score = (
         w_meta * meta_detail.final_score
@@ -290,7 +407,15 @@ async def analyze_user(
         linguistic_detail=linguistic_detail,
         network_detail=network_detail,
         history_hidden=profile.history_hidden,
+        history_recovered_via_osint=profile.history_recovered_via_osint,
         trigger_comment=trigger_comment_body,
+        custom_notes=custom_notes,
+        dynamic_weights={
+            "meta": w_meta,
+            "temporal": w_temporal,
+            "linguistic": w_linguistic,
+            "network": w_network,
+        },
     )
 
     # ── Step 5: Persist to DB ──────────────────────────────────────────

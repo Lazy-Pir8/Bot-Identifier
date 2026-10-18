@@ -67,8 +67,10 @@ def _format_result(res: BotAnalysisResult) -> Dict[str, Any]:
             "linguistic": res.score_linguistic,
             "network": res.score_network,
         },
+        "dynamic_weights": getattr(res, "dynamic_weights", None),
         "notes": res.all_notes[:4],
         "history_hidden": res.history_hidden,
+        "history_recovered_via_osint": getattr(res, "history_recovered_via_osint", False),
         "timestamp": res.analyzed_at,
     }
 

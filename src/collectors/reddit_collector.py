@@ -36,7 +36,10 @@ class RedditorProfile:
     is_mod: bool = False
     has_verified_email: bool = False
     history_hidden: bool = False       # True if Reddit hid their history
+    history_recovered_via_osint: bool = False  # True if recovered via OSINT/archives
     recent_comments: list[dict] = field(default_factory=list)
+    recent_posts: list[dict] = field(default_factory=list)
+    archive_source: Optional[str] = None
     fetch_error: Optional[str] = None
 
 
@@ -111,6 +114,37 @@ async def fetch_redditor_profile(
 
         profile.recent_comments = comments
 
+        # Also try fetching submissions/posts
+        posts = []
+        try:
+            async for sub in redditor.submissions.new(limit=min(max_comments // 2, 50)):
+                posts.append({
+                    "id": sub.id,
+                    "title": sub.title,
+                    "body": f"{sub.title}\n{sub.selftext}".strip() if getattr(sub, "selftext", None) else sub.title,
+                    "subreddit": str(sub.subreddit),
+                    "created_utc": sub.created_utc,
+                    "score": sub.score,
+                    "permalink": sub.permalink,
+                    "submission_id": sub.id,
+                    "parent_id": "",
+                    "is_post": True,
+                })
+        except Exception:
+            pass
+
+        profile.recent_posts = posts
+
+        # Fallback to public OSINT archives if history is hidden or empty
+        if profile.history_hidden or (not profile.recent_comments and not profile.recent_posts):
+            archive_profile = await _fetch_from_public_archives(username, max_comments)
+            if archive_profile.recent_comments or archive_profile.recent_posts:
+                profile.recent_comments = archive_profile.recent_comments
+                profile.recent_posts = archive_profile.recent_posts
+                profile.archive_source = archive_profile.archive_source
+                profile.history_recovered_via_osint = True
+                profile.history_hidden = False
+
     except asyncpraw.exceptions.InvalidURL:
         profile.fetch_error = "invalid_username"
     except Exception as e:
@@ -120,6 +154,14 @@ async def fetch_redditor_profile(
         elif "403" in err or "forbidden" in err:
             profile.history_hidden = True
             profile.fetch_error = "forbidden"
+            # Fall back to public OSINT archives
+            archive_profile = await _fetch_from_public_archives(username, max_comments)
+            if archive_profile.recent_comments or archive_profile.recent_posts:
+                profile.recent_comments = archive_profile.recent_comments
+                profile.recent_posts = archive_profile.recent_posts
+                profile.archive_source = archive_profile.archive_source
+                profile.history_recovered_via_osint = True
+                profile.history_hidden = False
         else:
             # Fall back to public archives
             return await _fetch_from_public_archives(username, max_comments)
@@ -161,6 +203,32 @@ async def _fetch_from_arctic_shift(session, username: str, max_comments: int = 1
     return []
 
 
+async def _fetch_posts_from_arctic_shift(session, username: str, max_posts: int = 50) -> list[dict]:
+    """Fetch posts/submissions from Arctic Shift public archive."""
+    url = f"https://arctic-shift.photon-reddit.com/api/posts/search?author={username}&limit={max_posts}"
+    async with session.get(url, headers=ARCHIVE_HEADERS, timeout=aiohttp.ClientTimeout(total=8)) as resp:
+        if resp.status == 200:
+            payload = await resp.json()
+            raw_posts = payload.get("data", [])
+            return [
+                {
+                    "id": p.get("id", ""),
+                    "title": p.get("title", ""),
+                    "body": f"{p.get('title', '')}\n{p.get('selftext', '')}".strip() if p.get('selftext') else p.get('title', ''),
+                    "subreddit": p.get("subreddit", ""),
+                    "created_utc": float(p.get("created_utc", 0.0)),
+                    "score": int(p.get("score", 0)),
+                    "permalink": p.get("permalink", ""),
+                    "submission_id": p.get("id", ""),
+                    "parent_id": "",
+                    "is_post": True,
+                }
+                for p in raw_posts
+                if p.get("title") or p.get("selftext")
+            ]
+    return []
+
+
 async def _fetch_from_pullpush(session, username: str, max_comments: int = 100) -> list[dict]:
     """Fetch comments from Pullpush public archive (fallback source)."""
     url = f"https://api.pullpush.io/reddit/search/comment/?author={username}&size={max_comments}"
@@ -181,6 +249,32 @@ async def _fetch_from_pullpush(session, username: str, max_comments: int = 100) 
                 }
                 for c in raw_comments
                 if c.get("body")
+            ]
+    return []
+
+
+async def _fetch_posts_from_pullpush(session, username: str, max_posts: int = 50) -> list[dict]:
+    """Fetch posts/submissions from Pullpush public archive."""
+    url = f"https://api.pullpush.io/reddit/search/submission/?author={username}&size={max_posts}"
+    async with session.get(url, headers=ARCHIVE_HEADERS, timeout=aiohttp.ClientTimeout(total=8)) as resp:
+        if resp.status == 200:
+            payload = await resp.json()
+            raw_posts = payload.get("data", [])
+            return [
+                {
+                    "id": p.get("id", ""),
+                    "title": p.get("title", ""),
+                    "body": f"{p.get('title', '')}\n{p.get('selftext', '')}".strip() if p.get('selftext') else p.get('title', ''),
+                    "subreddit": p.get("subreddit", ""),
+                    "created_utc": float(p.get("created_utc", 0.0)),
+                    "score": int(p.get("score", 0)),
+                    "permalink": p.get("permalink", ""),
+                    "submission_id": p.get("id", ""),
+                    "parent_id": "",
+                    "is_post": True,
+                }
+                for p in raw_posts
+                if p.get("title") or p.get("selftext")
             ]
     return []
 
@@ -212,30 +306,87 @@ async def _fetch_from_reddit_public_json(session, username: str, max_comments: i
     return []
 
 
+async def _fetch_posts_from_reddit_public_json(session, username: str, max_posts: int = 50) -> list[dict]:
+    """Fetch posts directly from Reddit unauthenticated public JSON."""
+    url = f"https://www.reddit.com/user/{username}/submitted.json?limit={min(max_posts, 100)}"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+    }
+    async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=6)) as resp:
+        if resp.status == 200:
+            payload = await resp.json()
+            children = payload.get("data", {}).get("children", [])
+            return [
+                {
+                    "id": c.get("data", {}).get("id", ""),
+                    "title": c.get("data", {}).get("title", ""),
+                    "body": f"{c.get('data', {}).get('title', '')}\n{c.get('data', {}).get('selftext', '')}".strip() if c.get('data', {}).get('selftext') else c.get('data', {}).get('title', ''),
+                    "subreddit": c.get("data", {}).get("subreddit", ""),
+                    "created_utc": float(c.get("data", {}).get("created_utc", 0.0)),
+                    "score": int(c.get("data", {}).get("score", 0)),
+                    "permalink": c.get("data", {}).get("permalink", ""),
+                    "submission_id": c.get("data", {}).get("id", ""),
+                    "parent_id": "",
+                    "is_post": True,
+                }
+                for c in children
+                if c.get("data", {}).get("title") or c.get("data", {}).get("selftext")
+            ]
+    return []
+
+
 async def _fetch_from_public_archives(username: str, max_comments: int = 100) -> RedditorProfile:
-    """Multi-source resilient fetcher: tries Arctic Shift -> Pullpush -> Reddit JSON."""
+    """
+    Multi-source resilient OSINT fetcher:
+    Queries Arctic Shift, Pullpush, and Reddit Public JSON for BOTH comments and posts.
+    Recovers historical footprints even if native profile is hidden or deleted.
+    """
     import aiohttp
     profile = RedditorProfile(username=username)
     comments = []
-    sources = [
+    posts = []
+    
+    comment_sources = [
         ("Arctic Shift", _fetch_from_arctic_shift),
         ("Pullpush", _fetch_from_pullpush),
         ("Reddit Public JSON", _fetch_from_reddit_public_json),
     ]
+    post_sources = [
+        ("Arctic Shift Posts", _fetch_posts_from_arctic_shift),
+        ("Pullpush Posts", _fetch_posts_from_pullpush),
+        ("Reddit Public JSON Posts", _fetch_posts_from_reddit_public_json),
+    ]
 
     async with aiohttp.ClientSession() as session:
-        for source_name, fetch_fn in sources:
+        # Fetch comments from first available source
+        for source_name, fetch_fn in comment_sources:
             try:
                 comments = await fetch_fn(session, username, max_comments)
                 if comments:
+                    profile.archive_source = source_name
+                    break
+            except Exception:
+                continue
+
+        # Fetch posts from first available source
+        for source_name, fetch_fn in post_sources:
+            try:
+                posts = await fetch_fn(session, username, max_comments // 2)
+                if posts:
                     break
             except Exception:
                 continue
 
     profile.recent_comments = comments
-    if comments:
-        profile.created_utc = min(c["created_utc"] for c in comments) - 86400 * 30
-        profile.comment_karma = sum(max(c["score"], 0) for c in comments)
+    profile.recent_posts = posts
+
+    all_items = comments + posts
+    if all_items:
+        profile.created_utc = min(c["created_utc"] for c in all_items) - 86400 * 30
+        profile.comment_karma = sum(max(c.get("score", 0), 0) for c in comments)
+        profile.link_karma = sum(max(p.get("score", 0), 0) for p in posts)
+        profile.history_recovered_via_osint = True
+        profile.history_hidden = False  # Successfully unhidden via OSINT!
     else:
         profile.history_hidden = True
         profile.fetch_error = "no_comments_available_from_any_source"

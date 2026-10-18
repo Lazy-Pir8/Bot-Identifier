@@ -203,7 +203,90 @@ class TestTextForensics:
         assert any("Karma-farming" in n for n in detail.notes)
 
 
-# ─── Evidence Tier Tests ───────────────────────────────────────────────────────
+    def test_monomania_and_political_propaganda_cluster(self):
+        now = time.time()
+        # 12 comments, 10 of which are in r/politics (83% concentration in a political sub)
+        comments = [
+            {"created_utc": now - i * 3600, "subreddit": "politics", "body": "Political debate statement"}
+            for i in range(10)
+        ]
+        comments.append({"created_utc": now - 11 * 3600, "subreddit": "worldnews", "body": "News statement"})
+        comments.append({"created_utc": now - 12 * 3600, "subreddit": "AskReddit", "body": "General question"})
+        detail = score_temporal(comments)
+        assert detail.monomania_score >= 0.70, f"Expected high monomania score, got {detail.monomania_score}"
+        assert detail.propaganda_risk_score >= 0.80, f"Expected high propaganda risk score, got {detail.propaganda_risk_score}"
+        assert any("Hyper-focused" in n or "Ideological" in n for n in detail.notes)
+
+    def test_sleep_trough_absence_and_24_7_activity(self):
+        now = time.time()
+        # Comments spread across 22 distinct hours of the day
+        comments = [
+            {"created_utc": now - h * 3600, "subreddit": "AskReddit", "body": "test"}
+            for h in range(22)
+        ]
+        detail = score_temporal(comments)
+        assert detail.shift_pattern_score >= 0.65, f"Expected elevated shift pattern score, got {detail.shift_pattern_score}"
+        assert any("24" in n for n in detail.notes)
+
+
+# ─── Evidence Tier & Dynamic Weighting Tests ────────────────────────────────────
+
+class TestDynamicWeighting:
+
+    def test_linguistic_decoupling_for_clean_text_bot(self):
+        from src.models.bot_classifier import compute_dynamic_weights
+        from src.features.metadata_extractor import MetaScoreDetail
+        from src.features.temporal_analyzer import TemporalScoreDetail
+        from src.features.text_forensics import LinguisticScoreDetail
+        from src.features.network_mapper import NetworkScoreDetail
+
+        # Simulating an LLM or paid-human astroturf bot:
+        # Perfectly natural text (linguistic score = 0.05)
+        # But sleeper account (meta = 0.85) and 24/7 robotic velocity (temporal = 0.90)
+        meta = MetaScoreDetail(final_score=0.85)
+        temp = TemporalScoreDetail(final_score=0.90)
+        ling = LinguisticScoreDetail(final_score=0.05)
+        net = NetworkScoreDetail(final_score=0.0)
+
+        w_meta, w_temp, w_ling, w_net, notes = compute_dynamic_weights(
+            meta_detail=meta,
+            temporal_detail=temp,
+            linguistic_detail=ling,
+            network_detail=net,
+            history_hidden=False,
+            comment_count=25,
+        )
+
+        assert w_ling <= 0.12, f"Clean text weight should be decoupled/lowered, got {w_ling}"
+        assert w_temp >= 0.40, f"Temporal weight should dominate, got {w_temp}"
+        assert w_meta >= 0.30, f"Meta weight should dominate, got {w_meta}"
+        assert abs((w_meta + w_temp + w_ling + w_net) - 1.0) < 0.01, "Weights must sum to 1.0"
+        assert any("linguistic decoupling" in n for n in notes)
+
+    def test_monomania_and_agenda_weight_boost(self):
+        from src.models.bot_classifier import compute_dynamic_weights
+        from src.features.metadata_extractor import MetaScoreDetail
+        from src.features.temporal_analyzer import TemporalScoreDetail
+        from src.features.text_forensics import LinguisticScoreDetail
+        from src.features.network_mapper import NetworkScoreDetail
+
+        meta = MetaScoreDetail(final_score=0.30)
+        temp = TemporalScoreDetail(final_score=0.45, monomania_score=0.85, propaganda_risk_score=0.80)
+        ling = LinguisticScoreDetail(final_score=0.35)
+        net = NetworkScoreDetail(final_score=0.0)
+
+        w_meta, w_temp, w_ling, w_net, notes = compute_dynamic_weights(
+            meta_detail=meta,
+            temporal_detail=temp,
+            linguistic_detail=ling,
+            network_detail=net,
+            history_hidden=False,
+            comment_count=20,
+        )
+
+        assert w_temp > 0.30, f"Temporal weight should be boosted for propaganda/agenda focus, got {w_temp}"
+        assert any("agenda/propaganda focus" in n for n in notes)
+
 
 class TestEvidenceHierarchy:
 
@@ -218,9 +301,13 @@ class TestEvidenceHierarchy:
             score_linguistic=0.9,
             score_network=0.0,
             evidence_tier="TIER_1_DETERMINISTIC",
+            history_recovered_via_osint=True,
+            dynamic_weights={"meta": 0.25, "temporal": 0.25, "linguistic": 0.30, "network": 0.20},
         )
         assert res.evidence_tier == "TIER_1_DETERMINISTIC"
         assert res.bot_score == 0.98
+        assert res.history_recovered_via_osint is True
+        assert res.dynamic_weights["linguistic"] == 0.30
 
 
 # ─── Run tests directly ────────────────────────────────────────────────────────
