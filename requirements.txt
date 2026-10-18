@@ -11,3 +11,4 @@ textstat>=0.7.0
 scipy>=1.14.0
 numpy>=2.1.0
 pytest>=8.0.0
+
