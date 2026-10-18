@@ -261,6 +261,30 @@ def benchmark(dataset: str | None):
     asyncio.run(run_benchmark(ds_path))
 
 
+# ─── botid audit ─────────────────────────────────────────────────────────────
+@cli.command("audit")
+@click.argument("username")
+@click.option("--no-interactive", is_flag=True, help="Disable interactive benchmark addition prompt")
+def audit(username: str, no_interactive: bool):
+    """Deep forensic inspection of an account with optional benchmark addition."""
+    from src.benchmark import audit_user
+    asyncio.run(audit_user(username, interactive=not no_interactive))
+
+
+# ─── botid add-benchmark ─────────────────────────────────────────────────────
+@cli.command("add-benchmark")
+@click.argument("username")
+@click.option("--label", "-l", required=True, type=click.Choice(["BOT", "HUMAN"], case_sensitive=False),
+              help="Ground truth label")
+@click.option("--category", "-c", default="in_the_wild", help="Category classification")
+@click.option("--notes", "-n", default="", help="Auditor notes or evidence description")
+def add_benchmark_cmd(username: str, label: str, category: str, notes: str):
+    """Add or update an account in the ground-truth benchmark dataset."""
+    from src.benchmark import add_to_benchmark
+    add_to_benchmark(username, expected_label=label, category=category, notes=notes)
+    console.print(f"[green]✓ Saved u/{username} as [{label.upper()}] ({category}) to benchmark dataset.[/green]")
+
+
 # ─── botid scan-page ─────────────────────────────────────────────────────────
 @cli.command("scan-page")
 @click.argument("target")

@@ -132,10 +132,15 @@ async def fetch_redditor_profile(
     return profile
 
 
+ARCHIVE_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+}
+
+
 async def _fetch_from_arctic_shift(session, username: str, max_comments: int = 100) -> list[dict]:
     """Fetch comments from Arctic Shift public archive."""
     url = f"https://arctic-shift.photon-reddit.com/api/comments/search?author={username}&limit={max_comments}"
-    async with session.get(url, timeout=aiohttp.ClientTimeout(total=6)) as resp:
+    async with session.get(url, headers=ARCHIVE_HEADERS, timeout=aiohttp.ClientTimeout(total=8)) as resp:
         if resp.status == 200:
             payload = await resp.json()
             raw_comments = payload.get("data", [])
@@ -159,7 +164,7 @@ async def _fetch_from_arctic_shift(session, username: str, max_comments: int = 1
 async def _fetch_from_pullpush(session, username: str, max_comments: int = 100) -> list[dict]:
     """Fetch comments from Pullpush public archive (fallback source)."""
     url = f"https://api.pullpush.io/reddit/search/comment/?author={username}&size={max_comments}"
-    async with session.get(url, timeout=aiohttp.ClientTimeout(total=6)) as resp:
+    async with session.get(url, headers=ARCHIVE_HEADERS, timeout=aiohttp.ClientTimeout(total=8)) as resp:
         if resp.status == 200:
             payload = await resp.json()
             raw_comments = payload.get("data", [])

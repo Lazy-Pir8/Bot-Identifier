@@ -202,6 +202,117 @@ async def run_benchmark(dataset_path: Path = BENCHMARK_FILE) -> dict:
     return history_entry
 
 
+def add_to_benchmark(username: str, expected_label: str, category: str = "in_the_wild", notes: str = "") -> bool:
+    """Add or update an account in the ground-truth benchmark dataset."""
+    if not BENCHMARK_FILE.exists():
+        data = {"description": "Benchmark test dataset for validation", "version": "1.0", "accounts": []}
+    else:
+        with open(BENCHMARK_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+
+    accounts = data.get("accounts", [])
+    existing = [a for a in accounts if a["username"].lower() == username.lower()]
+    clean_label = expected_label.upper()
+
+    if existing:
+        existing[0]["expected_label"] = clean_label
+        existing[0]["category"] = category
+        if notes:
+            existing[0]["notes"] = notes
+    else:
+        accounts.append({
+            "username": username,
+            "expected_label": clean_label,
+            "category": category,
+            "notes": notes or f"Audited on {time.strftime('%Y-%m-%d')}"
+        })
+
+    data["accounts"] = accounts
+    with open(BENCHMARK_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
+
+    return True
+
+
+async def audit_user(username: str, interactive: bool = True):
+    """Deep forensic inspection of an account to audit features and compare with ground truth."""
+    await db.init_db()
+    console.print(f"[cyan]Gathering forensic evidence for u/{username}...[/cyan]\n")
+
+    res = await analyze_user(username)
+    score_pct = int(round(res.bot_score * 100))
+    color = "red" if res.bot_score >= 0.65 else ("yellow" if res.bot_score >= 0.40 else "green")
+
+    # Layer details
+    meta = res.meta_detail
+    temp = res.temporal_detail
+    ling = res.linguistic_detail
+    net = res.network_detail
+
+    # Evidence Panel
+    lines = [
+        f"[bold]Account:[/bold] u/{res.username}  │  [bold]Calculated Bot Probability:[/bold] [{color}][bold]{score_pct}% ({res.label})[/bold][/{color}]",
+        f"[dim]History Status: {'Hidden / Incomplete' if res.history_hidden else 'Public comments captured'}[/dim]\n",
+        "[bold cyan]1. Account Metadata (S_meta):[/bold cyan]",
+        f"   • Score: {res.score_meta:.3f}",
+        f"   • Username pattern score: {meta.username_score:.2f}",
+        f"   • Dormancy score: {meta.dormancy_score:.2f}  │  Karma asymmetry score: {meta.karma_score:.2f}",
+        "",
+        "[bold cyan]2. Temporal & Posting Velocity (S_temporal):[/bold cyan]",
+        f"   • Score: {res.score_temporal:.3f}  (Sample size: {temp.sample_size if temp else 0} comments)",
+        f"   • Circadian uniformity: {temp.circadian_score:.3f} (1.0 = 24/7 robotic, 0.0 = human sleep trough)",
+        f"   • Regularity (IAT CV): {temp.iat_score:.3f}  │  Burst density: {temp.burst_score:.3f}",
+        f"   • Subreddit dispersion speed: {temp.dispersion_score:.3f}",
+        "",
+        "[bold cyan]3. Linguistic & Content Forensics (S_linguistic):[/bold cyan]",
+        f"   • Score: {res.score_linguistic:.3f}",
+        f"   • Known bot phrase matches: {ling.phrase_score:.3f} ({len(ling.matches)} hits)",
+        f"   • Template repetition score: {ling.template_score:.3f} (word/structure overlap across comments)",
+        f"   • LLM stylometric tone score: {ling.llm_tone_score:.3f}  │  Readability variance: {ling.readability_score:.3f}",
+        "",
+        "[bold cyan]4. Network Coordination (S_network):[/bold cyan]",
+        f"   • Score: {res.score_network:.3f}",
+        f"   • Co-occurrence: {net.cooccurrence_score:.3f}  │  Reply pairs: {net.reply_pair_score:.3f}",
+        "",
+        "[bold yellow]Signals & Detections Flagged:[/bold yellow]",
+    ]
+
+    if res.all_notes:
+        for n in res.all_notes:
+            lines.append(f"   • {n}")
+    else:
+        lines.append("   • [dim]No suspicious behavioral flags triggered.[/dim]")
+
+    console.print(Panel("\n".join(lines), title="[bold]Deep Behavioral Forensic Audit[/bold]", border_style=color))
+
+    # Show recent comments sample
+    recent = await db.get_user_comments(username, limit=3)
+    if recent:
+        console.print("\n[bold]Sample Recent Comments from u/" + username + ":[/bold]")
+        for i, c in enumerate(recent, 1):
+            body_snippet = c.get("body", "").replace("\n", " ")[:140]
+            console.print(f"  [dim]{i}.[/dim] in [cyan]r/{c.get('subreddit')}[/cyan]: \"{body_snippet}...\"")
+        console.print("")
+
+    if interactive:
+        from rich.prompt import Prompt
+        choice = Prompt.ask(
+            "Do you want to add this account to the ground-truth benchmark dataset?",
+            choices=["b", "h", "s"],
+            default="s"
+        )
+        if choice in ("b", "h"):
+            expected = "BOT" if choice == "b" else "HUMAN"
+            cat = Prompt.ask("Enter benchmark category", default="in_the_wild")
+            notes = Prompt.ask("Enter audit notes", default="")
+            add_to_benchmark(username, expected_label=expected, category=cat, notes=notes)
+            console.print(f"[green]✓ Added u/{username} as [{expected}] ({cat}) to benchmark_dataset.json[/green]")
+        else:
+            console.print("[dim]Skipped benchmark addition.[/dim]")
+
+    return res
+
+
 if __name__ == "__main__":
     asyncio.run(run_benchmark())
 
