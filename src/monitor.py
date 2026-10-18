@@ -45,15 +45,34 @@ _last_analyzed: dict[str, float] = {}
 _analysis_queue: asyncio.Queue = asyncio.Queue(maxsize=500)
 
 
+def _score_to_color(score: float) -> str:
+    """Return hex color based on the rich 7-tier score spectrum."""
+    if score >= 0.86:
+        return "#ff1744"
+    elif score >= 0.75:
+        return "#f43f5e"
+    elif score >= 0.60:
+        return "#f97316"
+    elif score >= 0.45:
+        return "#eab308"
+    elif score >= 0.30:
+        return "#06b6d4"
+    elif score >= 0.15:
+        return "#14b8a6"
+    else:
+        return "#10b981"
+
+
 def _label_color(label: str) -> str:
-    return {"BOT": "red", "SUSPECT": "yellow", "HUMAN": "green"}.get(label, "white")
+    return {"BOT": "#ff1744", "SUSPECT": "#eab308", "HUMAN": "#10b981"}.get(label, "white")
 
 
 def _score_bar(score: float, width: int = 20) -> str:
     filled = int(score * width)
     bar = "█" * filled + "░" * (width - filled)
-    color = "red" if score > 0.65 else "yellow" if score > 0.40 else "green"
-    return f"[{color}]{bar}[/{color}] {score:.2f}"
+    color = _score_to_color(score)
+    pct = int(round(score * 100))
+    return f"[{color}]{bar}[/{color}] {pct}%"
 
 
 async def _analysis_worker() -> None:

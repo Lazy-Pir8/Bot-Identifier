@@ -34,20 +34,22 @@ _CACHE: Dict[str, tuple[float, Dict[str, Any]]] = {}
 CACHE_TTL = 3600  # 1 hour cache
 
 
-def _score_to_color(score: float, label: str) -> str:
-    """Return hex color and glowing CSS styling based on score."""
-    if label == "BOT":
-        # Dynamic red brightness based on score severity
-        if score >= 0.85:
-            return "#ff1744"  # bright neon red
-        return "#ef4444"      # standard crimson
-    elif label == "SUSPECT":
-        return "#f59e0b"      # warm amber
+def _score_to_color(score: float, label: str = "") -> str:
+    """Return hex color based on the rich 7-tier score spectrum."""
+    if score >= 0.86:
+        return "#ff1744"  # Tier 7: Neon Hot Red (Blatant Bot)
+    elif score >= 0.75:
+        return "#f43f5e"  # Tier 6: Coral Crimson (Likely Bot)
+    elif score >= 0.60:
+        return "#f97316"  # Tier 5: Vivid Tangerine Orange (High Suspicion)
+    elif score >= 0.45:
+        return "#eab308"  # Tier 4: Warm Amber / Gold (Moderate Irregularity)
+    elif score >= 0.30:
+        return "#06b6d4"  # Tier 3: Vibrant Sky Blue (Mild Inconsistencies)
+    elif score >= 0.15:
+        return "#14b8a6"  # Tier 2: Teal / Cyan-Green (Normal Human)
     else:
-        # Green brightness: lower score = cleaner green
-        if score <= 0.15:
-            return "#10b981"  # vibrant emerald
-        return "#34d399"      # mint green
+        return "#10b981"  # Tier 1: Pure Emerald Green (Pristine Human)
 
 
 def _format_result(res: BotAnalysisResult) -> Dict[str, Any]:

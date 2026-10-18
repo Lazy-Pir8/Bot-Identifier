@@ -71,23 +71,23 @@
       letter-spacing: 0.05em;
       margin-top: 2px;
     }
-    .legend {
+    .legend-container {
+      margin-top: 10px;
+      padding-top: 10px;
+      border-top: 1px solid #27272a;
+    }
+    .legend-bar {
+      height: 8px;
+      border-radius: 9999px;
+      background: linear-gradient(to right, #10b981, #14b8a6, #06b6d4, #eab308, #f97316, #f43f5e, #ff1744);
+      margin-bottom: 6px;
+      box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+    }
+    .legend-labels {
       display: flex;
       justify-content: space-between;
       font-size: 10px;
-      padding-top: 8px;
-      border-top: 1px solid #27272a;
-      color: #a1a1aa;
-    }
-    .legend-item {
-      display: flex;
-      align-items: center;
-      gap: 4px;
-    }
-    .legend-box {
-      width: 10px;
-      height: 10px;
-      border-radius: 2px;
+      font-weight: 600;
     }
     .info-footer {
       margin-top: 12px;
@@ -122,18 +122,12 @@
     <div class="stat-label">Authors Labeled on Page</div>
   </div>
 
-  <div class="legend">
-    <div class="legend-item">
-      <div class="legend-box" style="background: #10b981;"></div>
-      <span>Human</span>
-    </div>
-    <div class="legend-item">
-      <div class="legend-box" style="background: #f59e0b;"></div>
-      <span>Suspect</span>
-    </div>
-    <div class="legend-item">
-      <div class="legend-box" style="background: #ef4444;"></div>
-      <span>Bot</span>
+  <div class="legend-container">
+    <div class="legend-bar"></div>
+    <div class="legend-labels">
+      <span style="color: #10b981;">0% Human</span>
+      <span style="color: #eab308;">50%</span>
+      <span style="color: #ff1744;">100% Bot</span>
     </div>
   </div>
 

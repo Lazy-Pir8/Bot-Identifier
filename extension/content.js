@@ -45,6 +45,19 @@ function extractUsername(element) {
 }
 
 /**
+ * Return tier CSS class based on continuous 7-tier score spectrum
+ */
+function getTierClass(score) {
+  if (score >= 0.86) return "rbi-tier-7";
+  if (score >= 0.75) return "rbi-tier-6";
+  if (score >= 0.60) return "rbi-tier-5";
+  if (score >= 0.45) return "rbi-tier-4";
+  if (score >= 0.30) return "rbi-tier-3";
+  if (score >= 0.15) return "rbi-tier-2";
+  return "rbi-tier-1";
+}
+
+/**
  * Build badge DOM element with tooltip
  */
 function createBadge(data) {
@@ -52,14 +65,15 @@ function createBadge(data) {
   container.className = "rbi-badge-container";
   container.dataset.rbiUser = data.username;
 
-  const scorePct = Math.round(data.score * 100);
-  const labelClass = `rbi-label-${data.label.toLowerCase()}`;
-  const isHighBot = data.label === "BOT" && data.score >= 0.85;
+  const scorePct = Math.round((data.score || 0) * 100);
+  const tierClass = getTierClass(data.score || 0);
+  const isHighBot = (data.score || 0) >= 0.86;
 
-  // Badge pill
+  // Badge pill: Show ONLY percentage
   const badge = document.createElement("span");
-  badge.className = `rbi-badge ${labelClass} ${isHighBot ? "rbi-high-bot" : ""}`;
-  badge.innerText = `${data.label} ${scorePct}%`;
+  badge.className = `rbi-badge ${tierClass} ${isHighBot ? "rbi-high-bot" : ""}`;
+  badge.innerText = `${scorePct}%`;
+  badge.title = `Bot probability: ${scorePct}%`;
 
   // Interactive tooltip
   const tooltip = document.createElement("div");
@@ -78,7 +92,7 @@ function createBadge(data) {
   tooltip.innerHTML = `
     <div class="rbi-tooltip-header">
       <span class="rbi-tooltip-title">u/${escapeHtml(data.username)}</span>
-      <span class="rbi-tooltip-score" style="color: ${data.color};">${data.label} (${scorePct}%)</span>
+      <span class="rbi-tooltip-score" style="color: ${data.color || '#fff'};">${scorePct}% Bot Likelihood</span>
     </div>
     <div class="rbi-tooltip-breakdown">
       <div>Meta: ${(scores.meta || 0).toFixed(2)}</div>

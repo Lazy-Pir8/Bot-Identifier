@@ -14,54 +14,93 @@
 .rbi-badge {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
-  padding: 1px 6px;
+  justify-content: center;
+  min-width: 28px;
+  padding: 1px 5px;
   border-radius: 9999px;
   font-size: 10px;
   font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.02em;
   color: #ffffff;
   line-height: 14px;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
   transition: transform 0.15s ease, box-shadow 0.15s ease;
 }
 
 .rbi-badge:hover {
-  transform: scale(1.08);
+  transform: scale(1.12);
 }
 
-/* ─── Label Color Schemes & Brightness ────────────────────────────── */
+/* ─── 7-Tier Diverse Color Spectrum ──────────────────────────────── */
 
-/* Human: Clean emerald / mint green */
+/* Tier 1 (0–14%): Pure Emerald Green (Pristine Human) */
+.rbi-tier-1 {
+  background: linear-gradient(135deg, #10b981, #059669);
+  box-shadow: 0 1px 3px rgba(16, 185, 129, 0.35);
+}
+
+/* Tier 2 (15–29%): Teal / Cyan-Green (Normal Human) */
+.rbi-tier-2 {
+  background: linear-gradient(135deg, #14b8a6, #0d9488);
+  box-shadow: 0 1px 3px rgba(20, 184, 166, 0.35);
+}
+
+/* Tier 3 (30–44%): Sky Blue (Mild Inconsistencies) */
+.rbi-tier-3 {
+  background: linear-gradient(135deg, #06b6d4, #0284c7);
+  box-shadow: 0 1px 3px rgba(6, 182, 212, 0.35);
+}
+
+/* Tier 4 (45–59%): Warm Amber / Gold (Moderate Irregularity) */
+.rbi-tier-4 {
+  background: linear-gradient(135deg, #eab308, #ca8a04);
+  box-shadow: 0 1px 3px rgba(234, 179, 8, 0.40);
+}
+
+/* Tier 5 (60–74%): Vivid Tangerine Orange (High Suspicion) */
+.rbi-tier-5 {
+  background: linear-gradient(135deg, #f97316, #ea580c);
+  box-shadow: 0 1px 4px rgba(249, 115, 22, 0.45);
+}
+
+/* Tier 6 (75–85%): Coral Crimson (Likely Bot) */
+.rbi-tier-6 {
+  background: linear-gradient(135deg, #f43f5e, #e11d48);
+  box-shadow: 0 1px 5px rgba(244, 63, 94, 0.50);
+}
+
+/* Tier 7 (86–100%): Neon Hot Red (Blatant Bot) */
+.rbi-tier-7 {
+  background: linear-gradient(135deg, #ff1744, #d50000);
+  box-shadow: 0 1px 6px rgba(255, 23, 68, 0.60);
+}
+
+/* Backward compatibility for legacy classes */
 .rbi-label-human {
   background: linear-gradient(135deg, #10b981, #059669);
   box-shadow: 0 1px 3px rgba(16, 185, 129, 0.25);
 }
 
-/* Suspect: Amber / Gold */
 .rbi-label-suspect {
   background: linear-gradient(135deg, #f59e0b, #d97706);
   box-shadow: 0 1px 3px rgba(245, 158, 11, 0.35);
 }
 
-/* Bot: Crimson / Neon Red with dynamic pulse for high scores */
 .rbi-label-bot {
   background: linear-gradient(135deg, #ef4444, #dc2626);
   box-shadow: 0 1px 4px rgba(239, 68, 68, 0.45);
 }
 
 .rbi-high-bot {
-  background: linear-gradient(135deg, #ff1744, #d50000) !important;
-  box-shadow: 0 0 8px rgba(255, 23, 68, 0.7) !important;
   animation: rbi-pulse 2s infinite ease-in-out;
 }
 
 @keyframes rbi-pulse {
   0%, 100% {
-    box-shadow: 0 0 6px rgba(255, 23, 68, 0.5);
+    box-shadow: 0 0 5px rgba(255, 23, 68, 0.5);
   }
   50% {
-    box-shadow: 0 0 12px rgba(255, 23, 68, 0.9);
+    box-shadow: 0 0 12px rgba(255, 23, 68, 0.95);
   }
 }
 
