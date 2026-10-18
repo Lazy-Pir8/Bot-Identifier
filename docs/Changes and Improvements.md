@@ -17,3 +17,9 @@ Phase - 2
 - Need to Work on Latency, it's really slow for now. What can be done for that. How to display the numbers on the page instantly, for now it takes 10 or more seconds.(We first check whether the bot is in any curated db of bots, through Community Consensus & Watchlists). Can we make it a O(1) operation. Or store all these watchlist before hand so we just need to check with our dbs, or dynamically checking would be faster?
 - If comment history is hidden, does the program atleast take into account the comment posted by that user on the current page? Cause that is visible. 
 - Are we implementing the 3-Tier Evidence Hierarchy
+
+___________________________
+
+Phase - 3
+- Can we find comments for a user that has hidden comments and posts using rosint or some other API are whatever APis we are already using.
+- The weighing of the different factors taken need to be dynamic. For a user  which has random(totally human like) comments, other factors like when was the account active, when not, the subreddits and name factors become more important. So The weighting of : Metadata Extractor Temporal Analyzer (S_tempora(, Text Forensics (S_linguistic),Network Mapper (S_network). Need to be dynamic and take account of different factors, for bots which does not work the usual way(might be even a human or a group spamming from many account. I want them to be counted as bots too), for that consider factors like when was the bot active, or what subs it is active in , like if focused on just 1 type of subs. Or Being Random, or maybe for bots focused on special thing like political propogandas. Need to address all these type of issues.
