@@ -189,3 +189,4 @@ detail.final_score = (
 
 > [!TIP]
 > **Next Step:** To learn how these forensic layers interact with deterministic disclaimers and the $O(1)$ fast-path registry, proceed to **[04 Three-Tier Evidence Hierarchy & Latency](file:///home/lazy_pirate/projects/reddit-bot-identifier/docs/04_Three_Tier_Evidence_Hierarchy_and_Latency.md)**.
+

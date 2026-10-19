@@ -207,3 +207,4 @@ return round(w_meta, 4), round(w_temporal, 4), round(w_linguistic, 4), round(w_n
 
 > [!TIP]
 > **Next Step:** To see how the four individual forensic layer scores ($S_{\text{meta}}, S_{\text{temporal}}, S_{\text{linguistic}}, S_{\text{network}}$) are computed under the hood, proceed to **[03 Four-Layer Behavioral Forensics](file:///home/lazy_pirate/projects/reddit-bot-identifier/docs/03_Four_Layer_Behavioral_Forensics.md)**.
+

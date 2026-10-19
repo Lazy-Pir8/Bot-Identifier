@@ -125,3 +125,4 @@ To provide deep technical clarity without information overload, this documentati
 
 > [!TIP]
 > **Next Step:** To explore how data is ingested, cached, and recovered from public archives when profiles are hidden, proceed to **[01 Data Pipeline & Multi-Archive OSINT](file:///home/lazy_pirate/projects/reddit-bot-identifier/docs/01_Data_Pipeline_and_Multi_Archive_OSINT.md)**.
+

@@ -188,3 +188,4 @@ This extracted body is packaged into the batch payload and sent to the API serve
 
 > [!TIP]
 > **Next Step:** To inspect the real-world validation results, edge-case bot analyses, and quantitative benchmark scores, proceed to **[06 Benchmark Methodology & Real-World Validation](file:///home/lazy_pirate/projects/reddit-bot-identifier/docs/06_Benchmark_Methodology_and_Validation.md)**.
+

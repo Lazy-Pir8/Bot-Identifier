@@ -121,3 +121,4 @@ This restores continuous probabilistic behavior across the spectrum while guaran
 
 > [!TIP]
 > **Next Step:** To see how these scores and evidence tiers are rendered in the browser UI, proceed to **[05 Browser Extension & DOM Architecture](file:///home/lazy_pirate/projects/reddit-bot-identifier/docs/05_Browser_Extension_and_DOM_Architecture.md)**.
+
