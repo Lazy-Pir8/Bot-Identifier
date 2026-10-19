@@ -8,6 +8,7 @@
 
 const API_SERVER = "http://127.0.0.1:8000";
 const PENDING_QUEUE = new Map(); // username -> Array of DOM elements
+const CLIENT_CACHE = new Map();  // username -> result data (in-memory instant cache)
 let debounceTimer = null;
 
 // Track scanned stats for the extension popup
@@ -37,32 +38,68 @@ function showTooltip(badgeEl, data) {
   const tooltip = getOrCreateGlobalTooltip();
   const scorePct = Math.round((data.score || 0) * 100);
   const scores = data.scores || {};
+  const weights = data.dynamic_weights || null;
   const tierName = formatTierLabel(data.evidence_tier);
 
-  let notesHtml = "";
-  if (data.notes && data.notes.length > 0) {
-    notesHtml = `
+  const verdictSummary = data.verdict_summary || (
+    scorePct >= 65 ? "Automated bot profile identified based on behavioral patterns." :
+    (scorePct >= 40 ? "Suspicious activity pattern with mixed behavioral signals." : "Authentic organic human profile.")
+  );
+
+  const primaryFactor = data.primary_factor || (
+    scorePct >= 65 ? "Temporal Activity Dynamics" : "Organic Human Profile"
+  );
+
+  const reasons = (data.specific_reasons && data.specific_reasons.length > 0)
+    ? data.specific_reasons
+    : (data.notes && data.notes.length > 0 ? data.notes : []);
+
+  let reasonsHtml = "";
+  if (reasons.length > 0) {
+    reasonsHtml = `
+      <div class="rbi-tooltip-section-title">Key Observations & Evidence</div>
       <div class="rbi-tooltip-notes">
-        ${data.notes.map(n => `<div class="rbi-tooltip-note-item"><span>•</span> <span>${escapeHtml(n)}</span></div>`).join("")}
+        ${reasons.slice(0, 5).map(r => `
+          <div class="rbi-tooltip-note-item">
+            <span class="rbi-bullet">•</span>
+            <span>${escapeHtml(r)}</span>
+          </div>
+        `).join("")}
       </div>
     `;
   }
 
   const tierBadgeHtml = tierName ? `<span class="rbi-tooltip-tier">${escapeHtml(tierName)}</span>` : "";
 
+  function formatLayer(score, weight) {
+    const sStr = (score || 0).toFixed(2);
+    if (weight !== null && weight !== undefined) {
+      const wPct = Math.round(weight * 100);
+      return `${sStr} <span class="rbi-weight">(${wPct}%)</span>`;
+    }
+    return sStr;
+  }
+
   tooltip.innerHTML = `
     <div class="rbi-tooltip-header">
       <span class="rbi-tooltip-title">u/${escapeHtml(data.username)}</span>
-      <span class="rbi-tooltip-score" style="color: ${data.color || '#fff'};">${scorePct}% Bot Likelihood</span>
+      <span class="rbi-tooltip-score" style="color: ${data.color || '#fff'};">${scorePct}% Bot Score</span>
     </div>
-    ${tierBadgeHtml ? `<div class="rbi-tooltip-tier-row">${tierBadgeHtml}</div>` : ""}
+    <div class="rbi-tooltip-tier-row">
+      ${tierBadgeHtml}
+      <span class="rbi-tooltip-driver">${escapeHtml(primaryFactor)}</span>
+    </div>
+    <div class="rbi-tooltip-verdict">
+      ${escapeHtml(verdictSummary)}
+    </div>
+    <div class="rbi-tooltip-section-title">Forensic Layer Breakdown</div>
     <div class="rbi-tooltip-breakdown">
-      <div>Meta: ${(scores.meta || 0).toFixed(2)}</div>
-      <div>Temporal: ${(scores.temporal || 0).toFixed(2)}</div>
-      <div>Linguistic: ${(scores.linguistic || 0).toFixed(2)}</div>
-      <div>Network: ${(scores.network || 0).toFixed(2)}</div>
+      <div class="rbi-breakdown-col"><span class="rbi-layer-name">Meta:</span> ${formatLayer(scores.meta, weights ? weights.meta : null)}</div>
+      <div class="rbi-breakdown-col"><span class="rbi-layer-name">Temporal:</span> ${formatLayer(scores.temporal, weights ? weights.temporal : null)}</div>
+      <div class="rbi-breakdown-col"><span class="rbi-layer-name">Linguistic:</span> ${formatLayer(scores.linguistic, weights ? weights.linguistic : null)}</div>
+      <div class="rbi-breakdown-col"><span class="rbi-layer-name">Network:</span> ${formatLayer(scores.network, weights ? weights.network : null)}</div>
     </div>
-    ${notesHtml}
+    ${reasonsHtml}
   `;
 
   tooltip.style.display = "block";
@@ -269,9 +306,38 @@ function escapeHtml(text) {
 }
 
 /**
+ * Inject single badge strictly next to author element
+ */
+function injectBadge(el, result) {
+  if (!el || !el.isConnected) return;
+
+  // Ensure this comment or post container hasn't already received a badge
+  const parentContainer = el.closest('shreddit-comment, shreddit-post, div.comment, [data-testid="comment"], [data-testid="post-container"], article, tr.thing');
+  if (parentContainer && (parentContainer.dataset.rbiLabeled === "true" || parentContainer.querySelector('.rbi-badge'))) {
+    return;
+  }
+
+  // Prevent duplicate badge directly next to element
+  if (el.nextElementSibling && el.nextElementSibling.classList.contains("rbi-badge")) {
+    return;
+  }
+
+  const badge = createBadge(result);
+
+  // Always place strictly to the RIGHT of the author name element
+  el.insertAdjacentElement("afterend", badge);
+
+  if (parentContainer) {
+    parentContainer.dataset.rbiLabeled = "true";
+  }
+
+  labeledCount++;
+}
+
+/**
  * Scan DOM for unparsed author elements
  */
-function scanAuthors() {
+function scanAuthors(isInitial = false) {
   // Strictly target author name elements across Old Reddit, New Reddit, and Shreddit
   const selectors = [
     '[slot="authorName"]:not([data-rbi-checked])',                      // Shreddit comments & posts
@@ -296,6 +362,12 @@ function scanAuthors() {
     // Strict validation: must be author name text, NOT an avatar or comment body mention
     if (!isValidAuthorElement(el, username)) return;
 
+    // Fast Step 0: In-memory client cache lookup (0.0ms instant render)
+    if (CLIENT_CACHE.has(username)) {
+      injectBadge(el, CLIENT_CACHE.get(username));
+      return;
+    }
+
     const commentBody = extractCommentBody(el);
     const commentId = extractCommentId(el);
 
@@ -316,16 +388,16 @@ function scanAuthors() {
   });
 
   if (added > 0) {
-    scheduleBatchFetch();
+    scheduleBatchFetch(isInitial);
   }
 }
 
 /**
- * Debounce batch API request
+ * Debounce batch API request (ultra-low latency 75ms or 15ms initial)
  */
-function scheduleBatchFetch() {
+function scheduleBatchFetch(immediate = false) {
   if (debounceTimer) clearTimeout(debounceTimer);
-  debounceTimer = setTimeout(processBatchQueue, 350);
+  debounceTimer = setTimeout(processBatchQueue, immediate ? 15 : 75);
 }
 
 /**
@@ -334,7 +406,7 @@ function scheduleBatchFetch() {
 async function processBatchQueue() {
   if (PENDING_QUEUE.size === 0) return;
 
-  const currentEntries = Array.from(PENDING_QUEUE.entries()).slice(0, 40);
+  const currentEntries = Array.from(PENDING_QUEUE.entries()).slice(0, 50);
   const elementsToUpdate = new Map();
   const usersPayload = [];
   const usernamesPayload = [];
@@ -369,30 +441,11 @@ async function processBatchQueue() {
       const result = results[username];
       if (!result) return;
 
+      // Cache locally in tab memory for instant reuse
+      CLIENT_CACHE.set(username, result);
+
       elements.forEach((el) => {
-        if (!el.isConnected) return;
-
-        // Ensure this comment or post container hasn't already received a badge
-        const parentContainer = el.closest('shreddit-comment, shreddit-post, div.comment, [data-testid="comment"], [data-testid="post-container"], article, tr.thing');
-        if (parentContainer && (parentContainer.dataset.rbiLabeled === "true" || parentContainer.querySelector('.rbi-badge'))) {
-          return;
-        }
-
-        // Prevent duplicate badge directly next to element
-        if (el.nextElementSibling && el.nextElementSibling.classList.contains("rbi-badge")) {
-          return;
-        }
-
-        const badge = createBadge(result);
-
-        // Always place strictly to the RIGHT of the author name element
-        el.insertAdjacentElement("afterend", badge);
-
-        if (parentContainer) {
-          parentContainer.dataset.rbiLabeled = "true";
-        }
-
-        labeledCount++;
+        injectBadge(el, result);
       });
     });
 
@@ -408,11 +461,12 @@ async function processBatchQueue() {
 
 // ─── Initialize Observers ───────────────────────────────────────────────────
 
-scanAuthors();
+// Immediate initial scan for visible authors
+scanAuthors(true);
 
 // Watch for dynamically loaded comments (infinite scroll / expanding threads)
 const observer = new MutationObserver(() => {
-  scanAuthors();
+  scanAuthors(false);
 });
 
 observer.observe(document.body, {

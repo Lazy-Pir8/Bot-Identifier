@@ -107,17 +107,17 @@
 .rbi-tooltip {
   display: none;
   position: absolute;
-  background: #18181b;
+  background: #121215;
   color: #f4f4f5;
-  border: 1px solid #3f3f46;
-  border-radius: 8px;
-  padding: 10px 12px;
-  width: 230px;
+  border: 1px solid #333338;
+  border-radius: 9px;
+  padding: 11px 13px;
+  width: 290px;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   font-size: 11px;
   font-weight: 400;
   line-height: 1.4;
-  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.6), 0 8px 10px -6px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 12px 30px -4px rgba(0, 0, 0, 0.75), 0 8px 12px -6px rgba(0, 0, 0, 0.5);
   z-index: 2147483647;
   pointer-events: none;
   text-align: left;
@@ -128,13 +128,14 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 6px;
+  margin-bottom: 5px;
   padding-bottom: 5px;
   border-bottom: 1px solid #27272a;
 }
 
 .rbi-tooltip-title {
   font-weight: 700;
+  font-size: 12px;
   color: #ffffff;
 }
 
@@ -144,8 +145,11 @@
 }
 
 .rbi-tooltip-tier-row {
-  margin-top: -2px;
+  display: flex;
+  align-items: center;
   margin-bottom: 6px;
+  flex-wrap: wrap;
+  gap: 4px;
 }
 
 .rbi-tooltip-tier {
@@ -161,25 +165,77 @@
   text-transform: uppercase;
 }
 
+.rbi-tooltip-driver {
+  font-size: 9.5px;
+  color: #a1a1aa;
+  font-style: italic;
+}
+
+.rbi-tooltip-verdict {
+  background: rgba(255, 255, 255, 0.04);
+  border-left: 3px solid #38bdf8;
+  border-radius: 3px;
+  padding: 6px 8px;
+  margin-bottom: 7px;
+  font-size: 10.5px;
+  color: #f4f4f5;
+  line-height: 1.4;
+}
+
+.rbi-tooltip-section-title {
+  font-size: 8.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #71717a;
+  font-weight: 700;
+  margin-top: 6px;
+  margin-bottom: 3px;
+}
+
 .rbi-tooltip-breakdown {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 4px;
   margin-bottom: 6px;
   color: #a1a1aa;
-}
-
-.rbi-tooltip-notes {
-  margin-top: 6px;
-  padding-top: 5px;
-  border-top: 1px dashed #27272a;
-  color: #e4e4e7;
   font-size: 10px;
 }
 
-.rbi-tooltip-note-item {
+.rbi-breakdown-col {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: rgba(255, 255, 255, 0.03);
+  padding: 2px 5px;
+  border-radius: 3px;
+}
+
+.rbi-layer-name {
+  color: #d4d4d8;
+  font-weight: 600;
+}
+
+.rbi-weight {
+  font-size: 8.5px;
+  color: #71717a;
+}
+
+.rbi-tooltip-notes {
   margin-top: 2px;
+  padding-top: 4px;
+  color: #e4e4e7;
+  font-size: 10.5px;
+}
+
+.rbi-tooltip-note-item {
+  margin-top: 3px;
   display: flex;
   align-items: flex-start;
-  gap: 3px;
+  gap: 4px;
+  line-height: 1.35;
+}
+
+.rbi-bullet {
+  color: #38bdf8;
+  font-weight: bold;
 }

@@ -43,6 +43,9 @@ class BotAnalysisResult:
     custom_notes: list[str] = field(default_factory=list)
     dynamic_weights: Optional[dict[str, float]] = None
     analyzed_at: float = field(default_factory=time.time)
+    verdict_summary: str = ""
+    primary_factor: str = ""
+    specific_reasons: list[str] = field(default_factory=list)
 
     @property
     def all_notes(self) -> list[str]:
@@ -52,6 +55,156 @@ class BotAnalysisResult:
             if d and hasattr(d, 'notes'):
                 notes.extend(d.notes)
         return notes
+
+
+def _build_score_explanation(
+    username: str,
+    bot_score: float,
+    label: str,
+    evidence_tier: str,
+    meta_detail: MetaScoreDetail,
+    temporal_detail: TemporalScoreDetail,
+    linguistic_detail: LinguisticScoreDetail,
+    network_detail: NetworkScoreDetail,
+    dynamic_weights: dict[str, float],
+    custom_notes: list[str],
+) -> tuple[str, str, list[str]]:
+    """
+    Build a comprehensive, specific, and descriptive breakdown of WHY
+    the user received this score and the basis on which it was assigned.
+    """
+    specific_reasons: list[str] = []
+
+    # 1. Primary Factor
+    w_m = dynamic_weights.get("meta", 0.25)
+    w_t = dynamic_weights.get("temporal", 0.25)
+    w_l = dynamic_weights.get("linguistic", 0.30)
+    w_n = dynamic_weights.get("network", 0.20)
+
+    contrib_meta = w_m * meta_detail.final_score
+    contrib_temp = w_t * temporal_detail.final_score
+    contrib_ling = w_l * linguistic_detail.final_score
+    contrib_net = w_n * network_detail.final_score
+
+    if evidence_tier == "TIER_1_DETERMINISTIC":
+        primary_factor = "Deterministic Bot Disclaimer / Pattern"
+    elif evidence_tier == "TIER_2_COMMUNITY_WATCHLIST":
+        primary_factor = "Verified Community Watchlist Registry"
+    else:
+        candidates = [
+            ("Temporal Activity & Circadian Dynamics", contrib_temp, temporal_detail.final_score),
+            ("Linguistic & Content Forensics", contrib_ling, linguistic_detail.final_score),
+            ("Account Metadata & Origin", contrib_meta, meta_detail.final_score),
+            ("Network & Coordination Graph", contrib_net, network_detail.final_score),
+        ]
+        candidates.sort(key=lambda x: x[1], reverse=True)
+        if label == "HUMAN":
+            primary_factor = "Organic Human Behavioral Profile"
+        else:
+            primary_factor = candidates[0][0]
+
+    # 2. Specific Reasons
+    # --- Timing & Circadian Reasons ---
+    if temporal_detail.shift_pattern_score >= 0.65:
+        specific_reasons.append(
+            "24/7 Superhuman Activity: Active across almost all 24 hours with no biological sleep trough (rest gap < 4h)."
+        )
+    elif temporal_detail.circadian_score < 0.82 and temporal_detail.sample_size >= 4:
+        specific_reasons.append(
+            "Natural Circadian Rest: Clear biological sleep cycle detected with normal daily resting periods."
+        )
+
+    if temporal_detail.iat_score >= 0.65:
+        specific_reasons.append(
+            "Mechanical Pacing: Comment intervals follow rigid timer regularity (low variance, scripted scheduler)."
+        )
+    elif temporal_detail.sample_size >= 5 and temporal_detail.iat_score < 0.35:
+        specific_reasons.append(
+            "Organic Typing Cadence: Variable, natural pauses between posts typical of human reading and composition."
+        )
+
+    if temporal_detail.burst_score >= 0.60:
+        specific_reasons.append(
+            "High Burst Density: Multiple comments submitted within a tight 5-minute sliding window."
+        )
+
+    # --- Community & Topic Reasons ---
+    if temporal_detail.monomania_score >= 0.60:
+        specific_reasons.append(
+            "Topical Monomania: Hyper-concentrated activity in a single subreddit (agenda or dedicated single-purpose bot)."
+        )
+    if temporal_detail.propaganda_risk_score >= 0.60:
+        specific_reasons.append(
+            "Conflict Subreddit Focus: Disproportionate concentration in high-conflict political/ideological communities."
+        )
+    if temporal_detail.randomness_score >= 0.65:
+        specific_reasons.append(
+            "High-Entropy Scatter: Jumps rapidly across unrelated subreddits (automated crawler/scraper pattern)."
+        )
+    elif temporal_detail.sample_size >= 5 and temporal_detail.monomania_score < 0.40 and temporal_detail.propaganda_risk_score < 0.40:
+        specific_reasons.append(
+            "Diverse Community Interaction: Organic participation across multiple balanced discussion topics."
+        )
+
+    # --- Linguistic & Phrasing Reasons ---
+    if linguistic_detail.phrase_score >= 0.50:
+        matched_str = linguistic_detail.matches[0].phrase if linguistic_detail.matches else "bot trigger"
+        specific_reasons.append(
+            f"Bot Phrase Pattern: Detected automated phrasing or command syntax ('{matched_str[:45]}')."
+        )
+    if getattr(linguistic_detail, "template_score", 0.0) >= 0.70:
+        specific_reasons.append(
+            "Programmatic Template: High repetition of fixed comment layouts across different threads."
+        )
+    if linguistic_detail.llm_tone_score >= 0.30:
+        specific_reasons.append(
+            "Stylometric LLM Markers: Repetitive diplomatic hedging, formal bulleting, or customer-service tone."
+        )
+    elif len(specific_reasons) < 2 and label == "HUMAN":
+        specific_reasons.append(
+            "Authentic Natural Voice: Conversational English with natural emotional expression and grammatical variety."
+        )
+
+    # --- Metadata & Account Origins ---
+    if meta_detail.username_score >= 0.80:
+        specific_reasons.append(
+            "Algorithmic Username: Matches Reddit's default auto-generated format (Adjective_Noun_1234)."
+        )
+    if meta_detail.dormancy_score >= 0.60:
+        specific_reasons.append(
+            "Sleeper Dormancy Gap: Account sat completely idle for months after creation before sudden activation."
+        )
+    if meta_detail.karma_score >= 0.60:
+        specific_reasons.append(
+            "Karma Asymmetry: Extreme ratio between link and comment karma or superhuman karma gain velocity."
+        )
+
+    # Include custom notes
+    for cn in custom_notes:
+        if cn not in specific_reasons and not any(r.startswith(cn[:20]) for r in specific_reasons):
+            specific_reasons.append(cn)
+
+    # 3. Verdict Summary
+    if label == "BOT":
+        if evidence_tier == "TIER_1_DETERMINISTIC":
+            verdict_summary = "Confirmed Automated Bot: Self-identifying automated bot disclaimer or superhuman multi-subreddit execution velocity."
+        elif evidence_tier == "TIER_2_COMMUNITY_WATCHLIST":
+            verdict_summary = "Community Verified Bot: Confirmed automated service, financial tipping utility, or moderation bot registered in public watchlists."
+        elif temporal_detail.shift_pattern_score >= 0.65:
+            verdict_summary = "Automated Bot Profile: Superhuman 24/7 continuous operation without biological sleep troughs, driven by mechanical interval pacing."
+        elif temporal_detail.monomania_score >= 0.65:
+            verdict_summary = "Automated / Agenda Operation: Hyper-concentrated topical monomania with rigid posting intervals and algorithmic account traits."
+        else:
+            verdict_summary = f"Automated Bot Score ({int(bot_score * 100)}%): Primary driver is {primary_factor.lower()} with distinct non-human behavioral anomalies."
+    elif label == "SUSPECT":
+        verdict_summary = f"Suspicious Activity ({int(bot_score * 100)}%): Displays mixed signals — conversational text paired with anomalous posting cadence or account history gaps."
+    else:
+        if evidence_tier == "TIER_2_COMMUNITY_WATCHLIST":
+            verdict_summary = "Verified Authentic Account: Confirmed genuine human user in audited benchmark records."
+        else:
+            verdict_summary = f"Authentic Human Profile ({int(bot_score * 100)}%): Organic conversational phrasing, natural biological sleep schedule, and healthy topic diversity."
+
+    return verdict_summary, primary_factor, specific_reasons
 
 
 def _apply_label(score: float) -> str:
@@ -201,6 +354,14 @@ async def analyze_user(
             meta_s = 0.20 if wl_label == "BOT" else 0.04
             temp_s = 0.85 if wl_label == "BOT" else 0.10
             ling_s = 0.90 if wl_label == "BOT" else 0.04
+            is_bot = (wl_label == "BOT")
+            v_summary = "Community Verified Bot: Confirmed automated utility, financial tipping tool, or moderation bot registered in public community watchlists." if is_bot else "Verified Authentic Account: Confirmed genuine human user in audited benchmark records."
+            p_factor = "Verified Community Watchlist Registry"
+            s_reasons = [
+                f"Tier 2 Watchlist: Verified {wl_entry.get('category', 'community')} account",
+                wl_entry.get("notes") or ("Confirmed automated bot" if is_bot else "Confirmed authentic human user"),
+                "Deterministic classification based on verified community consensus",
+            ]
             result = BotAnalysisResult(
                 username=clean_username,
                 bot_score=wl_score,
@@ -220,6 +381,9 @@ async def analyze_user(
                     f"Tier 2: Community verified watchlist ({wl_entry.get('category', 'registry')})",
                     wl_entry.get("notes") or ("Confirmed automated bot" if wl_label == "BOT" else "Confirmed human account")
                 ],
+                verdict_summary=v_summary,
+                primary_factor=p_factor,
+                specific_reasons=s_reasons,
             )
             # Store visible comment if provided
             if trigger_comment_body:
@@ -249,6 +413,13 @@ async def analyze_user(
     if trigger_comment_body:
         norm_trigger = trigger_comment_body.lower()
         if "i am a bot" in norm_trigger or "performed automatically" in norm_trigger:
+            v_summary = "Deterministic Bot: Explicit automated bot disclaimer detected directly in comment text on current page."
+            p_factor = "Deterministic Bot Disclaimer"
+            s_reasons = [
+                "Definitive 'I am a bot' or 'performed automatically' declaration in comment text",
+                "Automated system notification formatting",
+                "Bypasses probabilistic weighting due to explicit self-identification",
+            ]
             result = BotAnalysisResult(
                 username=clean_username,
                 bot_score=0.98,
@@ -265,6 +436,9 @@ async def analyze_user(
                 history_hidden=False,
                 trigger_comment=trigger_comment_body,
                 custom_notes=["Tier 1: Definitive automated bot disclaimer detected in on-page comment"],
+                verdict_summary=v_summary,
+                primary_factor=p_factor,
+                specific_reasons=s_reasons,
             )
             await db.save_comment(
                 comment_id=trigger_comment_id or f"live_{int(time.time()*1000)}",
@@ -417,6 +591,22 @@ async def analyze_user(
             "network": w_network,
         },
     )
+
+    v_summary, p_factor, s_reasons = _build_score_explanation(
+        username=clean_username,
+        bot_score=bot_score,
+        label=label,
+        evidence_tier=evidence_tier,
+        meta_detail=meta_detail,
+        temporal_detail=temporal_detail,
+        linguistic_detail=linguistic_detail,
+        network_detail=network_detail,
+        dynamic_weights=result.dynamic_weights or {},
+        custom_notes=custom_notes,
+    )
+    result.verdict_summary = v_summary
+    result.primary_factor = p_factor
+    result.specific_reasons = s_reasons
 
     # ── Step 5: Persist to DB ──────────────────────────────────────────
     await db.upsert_user(

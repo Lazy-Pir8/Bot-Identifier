@@ -178,11 +178,21 @@ ARCHIVE_HEADERS = {
     "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
 }
 
+_SHARED_SESSION: Optional[aiohttp.ClientSession] = None
+
+
+async def get_shared_session() -> aiohttp.ClientSession:
+    global _SHARED_SESSION
+    if _SHARED_SESSION is None or _SHARED_SESSION.closed:
+        connector = aiohttp.TCPConnector(limit=100, ttl_dns_roundrobin=300, keepalive_timeout=75)
+        _SHARED_SESSION = aiohttp.ClientSession(connector=connector)
+    return _SHARED_SESSION
+
 
 async def _fetch_from_arctic_shift(session, username: str, max_comments: int = 100) -> list[dict]:
     """Fetch comments from Arctic Shift public archive."""
     url = f"https://arctic-shift.photon-reddit.com/api/comments/search?author={username}&limit={max_comments}"
-    async with session.get(url, headers=ARCHIVE_HEADERS, timeout=aiohttp.ClientTimeout(total=8)) as resp:
+    async with session.get(url, headers=ARCHIVE_HEADERS, timeout=aiohttp.ClientTimeout(total=3.5)) as resp:
         if resp.status == 200:
             payload = await resp.json()
             raw_comments = payload.get("data", [])
@@ -206,7 +216,7 @@ async def _fetch_from_arctic_shift(session, username: str, max_comments: int = 1
 async def _fetch_posts_from_arctic_shift(session, username: str, max_posts: int = 50) -> list[dict]:
     """Fetch posts/submissions from Arctic Shift public archive."""
     url = f"https://arctic-shift.photon-reddit.com/api/posts/search?author={username}&limit={max_posts}"
-    async with session.get(url, headers=ARCHIVE_HEADERS, timeout=aiohttp.ClientTimeout(total=8)) as resp:
+    async with session.get(url, headers=ARCHIVE_HEADERS, timeout=aiohttp.ClientTimeout(total=3.5)) as resp:
         if resp.status == 200:
             payload = await resp.json()
             raw_posts = payload.get("data", [])
@@ -232,7 +242,7 @@ async def _fetch_posts_from_arctic_shift(session, username: str, max_posts: int 
 async def _fetch_from_pullpush(session, username: str, max_comments: int = 100) -> list[dict]:
     """Fetch comments from Pullpush public archive (fallback source)."""
     url = f"https://api.pullpush.io/reddit/search/comment/?author={username}&size={max_comments}"
-    async with session.get(url, headers=ARCHIVE_HEADERS, timeout=aiohttp.ClientTimeout(total=8)) as resp:
+    async with session.get(url, headers=ARCHIVE_HEADERS, timeout=aiohttp.ClientTimeout(total=3.5)) as resp:
         if resp.status == 200:
             payload = await resp.json()
             raw_comments = payload.get("data", [])
@@ -256,7 +266,7 @@ async def _fetch_from_pullpush(session, username: str, max_comments: int = 100) 
 async def _fetch_posts_from_pullpush(session, username: str, max_posts: int = 50) -> list[dict]:
     """Fetch posts/submissions from Pullpush public archive."""
     url = f"https://api.pullpush.io/reddit/search/submission/?author={username}&size={max_posts}"
-    async with session.get(url, headers=ARCHIVE_HEADERS, timeout=aiohttp.ClientTimeout(total=8)) as resp:
+    async with session.get(url, headers=ARCHIVE_HEADERS, timeout=aiohttp.ClientTimeout(total=3.5)) as resp:
         if resp.status == 200:
             payload = await resp.json()
             raw_posts = payload.get("data", [])
@@ -285,7 +295,7 @@ async def _fetch_from_reddit_public_json(session, username: str, max_comments: i
     headers = {
         "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
     }
-    async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=6)) as resp:
+    async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=2.0)) as resp:
         if resp.status == 200:
             payload = await resp.json()
             children = payload.get("data", {}).get("children", [])
@@ -312,7 +322,7 @@ async def _fetch_posts_from_reddit_public_json(session, username: str, max_posts
     headers = {
         "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
     }
-    async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=6)) as resp:
+    async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=2.0)) as resp:
         if resp.status == 200:
             payload = await resp.json()
             children = payload.get("data", {}).get("children", [])
@@ -337,54 +347,77 @@ async def _fetch_posts_from_reddit_public_json(session, username: str, max_posts
 
 async def _fetch_from_public_archives(username: str, max_comments: int = 100) -> RedditorProfile:
     """
-    Multi-source resilient OSINT fetcher:
-    Queries Arctic Shift, Pullpush, and Reddit Public JSON for BOTH comments and posts.
-    Recovers historical footprints even if native profile is hidden or deleted.
+    Multi-source fast OSINT fetcher:
+    Tries fast public Reddit JSON first (~200ms), falling back to Arctic Shift & PullPush.
+    Executes comments and posts fetches in parallel to cut latency in half.
     """
-    import aiohttp
     profile = RedditorProfile(username=username)
-    comments = []
-    posts = []
-    
-    comment_sources = [
-        ("Arctic Shift", _fetch_from_arctic_shift),
-        ("Pullpush", _fetch_from_pullpush),
-        ("Reddit Public JSON", _fetch_from_reddit_public_json),
-    ]
-    post_sources = [
-        ("Arctic Shift Posts", _fetch_posts_from_arctic_shift),
-        ("Pullpush Posts", _fetch_posts_from_pullpush),
-        ("Reddit Public JSON Posts", _fetch_posts_from_reddit_public_json),
-    ]
+    session = await get_shared_session()
 
-    async with aiohttp.ClientSession() as session:
-        # Fetch comments from first available source
-        for source_name, fetch_fn in comment_sources:
-            try:
-                comments = await fetch_fn(session, username, max_comments)
-                if comments:
-                    profile.archive_source = source_name
-                    break
-            except Exception:
-                continue
+    async def _get_comments():
+        # Fast-path 1: Direct Reddit Public JSON (150-250ms)
+        try:
+            res = await _fetch_from_reddit_public_json(session, username, max_comments)
+            if res:
+                return res, "Reddit Public JSON"
+        except Exception:
+            pass
+        # Fallback 2: Arctic Shift
+        try:
+            res = await _fetch_from_arctic_shift(session, username, max_comments)
+            if res:
+                return res, "Arctic Shift"
+        except Exception:
+            pass
+        # Fallback 3: Pullpush
+        try:
+            res = await _fetch_from_pullpush(session, username, max_comments)
+            if res:
+                return res, "Pullpush"
+        except Exception:
+            pass
+        return [], None
 
-        # Fetch posts from first available source
-        for source_name, fetch_fn in post_sources:
-            try:
-                posts = await fetch_fn(session, username, max_comments // 2)
-                if posts:
-                    break
-            except Exception:
-                continue
+    async def _get_posts():
+        # Fast-path 1: Direct Reddit Public JSON (150-250ms)
+        try:
+            res = await _fetch_posts_from_reddit_public_json(session, username, max_comments // 2)
+            if res:
+                return res
+        except Exception:
+            pass
+        # Fallback 2: Arctic Shift Posts
+        try:
+            res = await _fetch_posts_from_arctic_shift(session, username, max_comments // 2)
+            if res:
+                return res
+        except Exception:
+            pass
+        # Fallback 3: Pullpush Posts
+        try:
+            res = await _fetch_posts_from_pullpush(session, username, max_comments // 2)
+            if res:
+                return res
+        except Exception:
+            pass
+        return []
 
-    profile.recent_comments = comments
-    profile.recent_posts = posts
+    # Run comment and post gathering concurrently
+    (comments_res, archive_source), posts_res = await asyncio.gather(
+        _get_comments(),
+        _get_posts(),
+        return_exceptions=False,
+    )
 
-    all_items = comments + posts
+    profile.recent_comments = comments_res
+    profile.recent_posts = posts_res
+    profile.archive_source = archive_source
+
+    all_items = comments_res + posts_res
     if all_items:
         profile.created_utc = min(c["created_utc"] for c in all_items) - 86400 * 30
-        profile.comment_karma = sum(max(c.get("score", 0), 0) for c in comments)
-        profile.link_karma = sum(max(p.get("score", 0), 0) for p in posts)
+        profile.comment_karma = sum(max(c.get("score", 0), 0) for c in comments_res)
+        profile.link_karma = sum(max(p.get("score", 0), 0) for p in posts_res)
         profile.history_recovered_via_osint = True
         profile.history_hidden = False  # Successfully unhidden via OSINT!
     else:

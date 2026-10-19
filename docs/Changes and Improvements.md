@@ -23,3 +23,9 @@ ___________________________
 Phase - 3
 - Can we find comments for a user that has hidden comments and posts using rosint or some other API are whatever APis we are already using.
 - The weighing of the different factors taken need to be dynamic. For a user  which has random(totally human like) comments, other factors like when was the account active, when not, the subreddits and name factors become more important. So The weighting of : Metadata Extractor Temporal Analyzer (S_tempora(, Text Forensics (S_linguistic),Network Mapper (S_network). Need to be dynamic and take account of different factors, for bots which does not work the usual way(might be even a human or a group spamming from many account. I want them to be counted as bots too), for that consider factors like when was the bot active, or what subs it is active in , like if focused on just 1 type of subs. Or Being Random, or maybe for bots focused on special thing like political propogandas. Need to address all these type of issues.
+
+__________________
+
+Phase - 4
+- The Hover menu needs to have a better description of why the user's Score. On What basis it was given, a more descriptive and more specific message.
+- Latency still is a issue. The scores appear quite late on a page. Maybe a network issue but still want to check if something can be done.
