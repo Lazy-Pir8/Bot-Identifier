@@ -75,8 +75,8 @@ def score_temporal(comments: list[dict]) -> TemporalScoreDetail:
     timestamps = sorted(c["created_utc"] for c in comments)
     detail.sample_size = len(timestamps)
 
-    # ── 1. Circadian entropy ──────────────────────────────────────────
-    # Bucket into 24 one-hour slots. Human sleep creates a trough.
+    # ── 1. Circadian entropy & Sleep Trough Detection ──────────────────
+    # Bucket into 24 one-hour slots. Human sleep creates a pronounced trough.
     # Max entropy = log2(24) ≈ 4.58 (perfectly uniform = bot-like)
     hour_buckets = [0] * 24
     for ts in timestamps:
@@ -86,15 +86,9 @@ def score_temporal(comments: list[dict]) -> TemporalScoreDetail:
 
     entropy = _shannon_entropy(hour_buckets)
     max_entropy = math.log2(24)  # 4.585
-    # Normalize: 0 = human (concentrated), 1 = bot (uniform)
     detail.circadian_score = entropy / max_entropy
-    if detail.circadian_score > 0.92:
-        detail.notes.append(
-            f"Near-uniform 24h activity (entropy={entropy:.2f}/{max_entropy:.2f}) — "
-            "no sleep trough detected"
-        )
 
-    # Detect 24/7 robotic operation vs human sleep window
+    # Detect 24/7 robotic operation vs biological human sleep window
     active_hours = sum(1 for h in hour_buckets if h > 0)
     extended_hours = hour_buckets + hour_buckets
     max_sleep_window = 0
@@ -107,7 +101,14 @@ def score_temporal(comments: list[dict]) -> TemporalScoreDetail:
             current_gap = 0
     max_sleep_window = min(max_sleep_window, 24)
 
-    if active_hours >= 20 and max_sleep_window < 4 and len(timestamps) >= 15:
+    # Biological sleep window confirmation (human defense)
+    if max_sleep_window >= 6 and detail.sample_size >= 8:
+        # A biological sleep window of 6+ hours confirms human daily rest
+        detail.circadian_score = min(detail.circadian_score * 0.35, 0.25)
+        detail.notes.append(
+            f"Biological sleep window confirmed: {max_sleep_window}h continuous rest trough detected"
+        )
+    elif active_hours >= 20 and max_sleep_window < 4 and len(timestamps) >= 15:
         detail.shift_pattern_score = 0.90
         detail.notes.append(
             f"Superhuman 24/7 activity: active in {active_hours}/24 hours with no sleep trough (max rest gap {max_sleep_window}h)"
@@ -116,6 +117,10 @@ def score_temporal(comments: list[dict]) -> TemporalScoreDetail:
         detail.shift_pattern_score = 0.65
         detail.notes.append(
             f"Unusual 24-hour activity: active in {active_hours}/24 hours (max rest gap {max_sleep_window}h)"
+        )
+    elif detail.circadian_score > 0.92:
+        detail.notes.append(
+            f"Near-uniform 24h activity (entropy={entropy:.2f}/{max_entropy:.2f}) — no sleep trough detected"
         )
 
     # ── 2. Inter-arrival time (IAT) regularity ────────────────────────
@@ -149,7 +154,6 @@ def score_temporal(comments: list[dict]) -> TemporalScoreDetail:
     # Bots often dump many comments in a short window (batch API calls).
     burst_score = 0.0
     if len(timestamps) >= 10:
-        # Slide a 5-minute window and count max density
         window = 300  # 5 minutes
         max_in_window = 0
         for i, t in enumerate(timestamps):
@@ -201,27 +205,29 @@ def score_temporal(comments: list[dict]) -> TemporalScoreDetail:
                 f"Karma-farming subreddit activity detected: r/{', r/'.join(sorted(farm_hits))}"
             )
 
-        # Subreddit diversity ratio: unique subreddits / total comments
         unique_subs = set(subs)
         diversity_ratio = len(unique_subs) / len(subs)
 
-        # Normalized Shannon entropy of subreddit distribution
         sub_counts = Counter(subs)
         sub_entropy = _shannon_entropy(list(sub_counts.values()))
         max_sub_entropy = math.log2(len(unique_subs)) if len(unique_subs) > 1 else 1.0
         entropy_ratio = sub_entropy / max_sub_entropy if max_sub_entropy > 0 else 0.0
 
-        # Highly scattered posting: posting across random, unrelated subreddits
-        if diversity_ratio >= 0.80 and len(subs) >= 6:
+        # Highly scattered crawler posting: dumping single comments across many random subreddits rapidly
+        span_hours = (max(timestamps) - min(timestamps)) / 3600.0 if len(timestamps) >= 2 else 999.0
+        if diversity_ratio >= 0.85 and len(subs) >= 10 and span_hours < 48:
             detail.randomness_score = min(entropy_ratio * 0.90, 1.0)
             detail.notes.append(
-                f"High subreddit randomness: {len(unique_subs)} unique subreddits in {len(subs)} comments ({diversity_ratio*100:.0f}% scatter)"
+                f"High rapid subreddit scatter: {len(unique_subs)} unique subreddits in {span_hours:.1f}h"
             )
-        elif diversity_ratio >= 0.50 and len(subs) >= 6:
-            detail.randomness_score = min(entropy_ratio * 0.65, 1.0)
+        elif diversity_ratio >= 0.65 and len(subs) >= 12 and span_hours < 72:
+            detail.randomness_score = min(entropy_ratio * 0.60, 1.0)
             detail.notes.append(
-                f"Moderate subreddit scatter: {len(unique_subs)} unique subreddits in {len(subs)} comments ({diversity_ratio*100:.0f}% scatter)"
+                f"Moderate subreddit scatter crawler: {len(unique_subs)} unique subreddits in {span_hours:.1f}h"
             )
+        else:
+            # Normal human multi-community participation
+            detail.randomness_score = 0.0
 
         # ── 6. Monomania & Political / Astroturfing Cluster Detection ────────
         top_sub, top_count = sub_counts.most_common(1)[0]
@@ -270,7 +276,7 @@ def score_temporal(comments: list[dict]) -> TemporalScoreDetail:
         base_score = max(base_score, detail.burst_score * 0.90)
     if detail.dispersion_score >= 0.8:
         base_score = max(base_score, detail.dispersion_score * 0.85)
-    if detail.circadian_score >= 0.88 and detail.sample_size >= 15:
+    if detail.circadian_score >= 0.88 and detail.sample_size >= 15 and max_sleep_window < 5:
         base_score = max(base_score, detail.circadian_score * 0.75)
 
     detail.final_score = min(base_score, 1.0)

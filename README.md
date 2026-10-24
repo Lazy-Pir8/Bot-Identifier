@@ -21,6 +21,7 @@ Detailed architectural, mathematical, and design reports are available in the [`
 - [Three-Tier Evidence Hierarchy and Latency](docs/04_Three_Tier_Evidence_Hierarchy_and_Latency.md): Deterministic rules, watchlist caching, probabilistic scoring, and Bayesian boost calibration.
 - [Browser Extension and DOM Architecture](docs/05_Browser_Extension_and_DOM_Architecture.md): Chromium extension structure, DOM observer, single-badge UI, and hover cards.
 - [Benchmark Methodology and Validation](docs/06_Benchmark_Methodology_and_Validation.md): Ground-truth dataset, evaluation framework, and performance metrics across bot archetypes.
+- [Dormancy Calibration and Coordination Forensics](docs/07_Dormancy_Calibration_and_Coordination_Forensics.md): Remediation of sample truncation dormancy false positives, username recalibration, biological sleep trough confirmation, domain syndication, and the Organic Human Shield.
 
 ---
 
@@ -44,6 +45,7 @@ reddit-bot-identifier/
 │   ├── 04_Three_Tier_Evidence_Hierarchy_and_Latency.md
 │   ├── 05_Browser_Extension_and_DOM_Architecture.md
 │   ├── 06_Benchmark_Methodology_and_Validation.md
+│   ├── 07_Dormancy_Calibration_and_Coordination_Forensics.md
 │   ├── Benchmark Methodology & Real World Validation.md
 │   ├── Bot Behavior Patterns & Indentification.md
 │   ├── Bot Identifer Architecture & Design.md
@@ -77,7 +79,7 @@ reddit-bot-identifier/
 │   └── cli.py                   # Command-line interface
 ├── tests/
 │   ├── __init__.py
-│   └── test_features.py         # Automated test suite (23 unit tests)
+│   └── test_features.py         # Automated test suite (29 unit tests)
 ├── logs/                        # Application logs
 ├── .env.example                 # Configuration template
 ├── .gitignore                   # Ignored files and local databases

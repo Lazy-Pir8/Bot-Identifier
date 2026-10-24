@@ -38,10 +38,57 @@ class TestMetadataExtractor:
         defaults.update(kwargs)
         return RedditorProfile(**defaults)
 
-    def test_default_username_high_score(self):
+    def test_default_username_mild_score(self):
         profile = self._make_profile(username="Cautious_Ad_8492")
         detail = score_metadata(profile)
-        assert detail.username_score >= 0.80, "Default username should score high"
+        assert detail.username_score == 0.20, "Default username should be a mild/weak prior (0.20)"
+        assert detail.is_default_username is True
+
+    def test_explicit_bot_username_high_score(self):
+        profile = self._make_profile(username="AutoModerator")
+        detail = score_metadata(profile)
+        assert detail.username_score >= 0.90, "Explicit bot username should score high"
+
+    def test_custom_username_zero_score(self):
+        profile = self._make_profile(username="Lazy-Pir8")
+        detail = score_metadata(profile)
+        assert detail.username_score == 0.0, "Custom username should score 0.0"
+        assert detail.is_custom_username is True
+
+    def test_dormancy_sampling_truncation_guard(self):
+        # Account is 2 years old, but collector only fetched 25 comments from the past 2 weeks
+        now = time.time()
+        recent = [{"created_utc": now - 14 * 86400 + i * 3600} for i in range(25)]
+        profile = self._make_profile(
+            created_utc=now - 730 * 86400,
+            comment_karma=850,
+            recent_comments=recent,
+        )
+        detail = score_metadata(profile, last_seen_utc=now)
+        # Oldest comment being 14 days old must NOT trigger a 716-day sleeper penalty
+        assert detail.dormancy_score == 0.0, "Truncated recent comment sample should not be flagged as sleeper"
+
+    def test_dormancy_velocity_coupling(self):
+        now = time.time()
+        # Sparse old account waking up with low human frequency (1 comment over 10 days)
+        sparse_human_comments = [{"created_utc": now - 10 * 86400}]
+        profile_human = self._make_profile(
+            created_utc=now - 200 * 86400,
+            comment_karma=5,
+            recent_comments=sparse_human_comments,
+        )
+        detail_human = score_metadata(profile_human, last_seen_utc=now)
+        assert detail_human.dormancy_score <= 0.10, "Low-velocity post-dormancy should be recognized as human"
+
+        # Sparse old account waking up with high-velocity burst (15 comments in 1 day)
+        burst_bot_comments = [{"created_utc": now - i * 3600} for i in range(15)]
+        profile_bot = self._make_profile(
+            created_utc=now - 200 * 86400,
+            comment_karma=15,
+            recent_comments=burst_bot_comments,
+        )
+        detail_bot = score_metadata(profile_bot, last_seen_utc=now)
+        assert detail_bot.dormancy_score >= 0.35, "High-velocity sudden activation should be flagged"
 
     def test_normal_username_low_score(self):
         profile = self._make_profile(username="xkcd_fan_42")
@@ -308,6 +355,41 @@ class TestEvidenceHierarchy:
         assert res.bot_score == 0.98
         assert res.history_recovered_via_osint is True
         assert res.dynamic_weights["linguistic"] == 0.30
+
+    def test_network_domain_syndication(self):
+        from src.features.network_mapper import score_network
+        import asyncio
+        comments = [
+            {"id": "c1", "body": "Check this out: https://t.me/free_crypto_group", "subreddit": "sub1", "submission_id": "s1", "created_utc": 100},
+            {"id": "c2", "body": "Join here guys: https://t.me/free_crypto_group", "subreddit": "sub2", "submission_id": "s2", "created_utc": 200},
+        ]
+        detail = asyncio.run(score_network("spambot123", comments))
+        assert detail.syndication_score >= 0.70, "Repeated shortener/telegram syndication should be detected"
+        assert any("shortener" in n.lower() or "syndication" in n.lower() for n in detail.notes)
+
+    def test_organic_human_shield(self):
+        from src.models.bot_classifier import compute_dynamic_weights
+        from src.features.metadata_extractor import MetaScoreDetail
+        from src.features.temporal_analyzer import TemporalScoreDetail
+        from src.features.text_forensics import LinguisticScoreDetail
+        from src.features.network_mapper import NetworkScoreDetail
+
+        # Authentic human with default username pattern (0.20), but organic writing & sleep window
+        meta = MetaScoreDetail(final_score=0.20, username_score=0.20, is_default_username=True)
+        temp = TemporalScoreDetail(final_score=0.15, shift_pattern_score=0.0, burst_score=0.0)
+        ling = LinguisticScoreDetail(final_score=0.05, phrase_score=0.0, template_score=0.0)
+        net = NetworkScoreDetail(final_score=0.0)
+
+        w_meta, w_temp, w_ling, w_net, notes = compute_dynamic_weights(
+            meta_detail=meta,
+            temporal_detail=temp,
+            linguistic_detail=ling,
+            network_detail=net,
+            history_hidden=False,
+            comment_count=15,
+        )
+        raw_score = w_meta * meta.final_score + w_temp * temp.final_score + w_ling * ling.final_score
+        assert raw_score < 0.25, f"Authentic human with default username should score safely low, got {raw_score}"
 
 
 # ─── Run tests directly ────────────────────────────────────────────────────────

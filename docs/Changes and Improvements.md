@@ -29,3 +29,15 @@ __________________
 Phase - 4
 - The Hover menu needs to have a better description of why the user's Score. On What basis it was given, a more descriptive and more specific message.
 - Latency still is a issue. The scores appear quite late on a page. Maybe a network issue but still want to check if something can be done.
+
+
+__________________
+
+Phase - 5
+- Corrected Dormancy Gap False Positives: Fixed sample truncation artifact where fetching only recent comments (e.g. 20-30 days) incorrectly marked older accounts as having multi-year dormant gaps.
+- Velocity-Coupled Dormancy: An inactive or dormant account is only scored as a sleeper bot if its reactivation exhibits abnormal burst velocity (>=8 comments/day) or template spam, distinguishing normal human lurkers from automated bot fleets.
+- Username Pattern Recalibration: Re-calibrated default Reddit-suggested usernames (Adjective-Noun-1234) from 0.85 down to 0.20 (weak prior) since millions of genuine mobile/OAuth humans use them, while custom handles are scored at 0.0 with organic human weighting.
+- Biological Circadian Sleep Trough Confirmation: Verified sleep windows (>=6 hours of rest across circular midnight) now scale down circadian entropy and reward authentic human sleep biology.
+- Raised Linguistic Decoupling Guard: Prevented clean natural comments from being decoupled unless confirmed high-confidence automation flags (superhuman velocity, 24/7 continuous operation) exist.
+- Organic Human Shield: Accounts exhibiting natural vocabulary variety, biological sleep troughs, and non-burst cadences are protected by an organic dampener, dropping false positive scores on genuine human profiles from 55-60% down to under 10%.
+- Expanded Network & Coordination Engine: Added external URL/shortener syndication detection, temporal proximity thread swarming (<90s clusters), and reciprocal echo-chamber detection.

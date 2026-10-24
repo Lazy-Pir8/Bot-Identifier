@@ -166,9 +166,17 @@ def _build_score_explanation(
         )
 
     # --- Metadata & Account Origins ---
-    if meta_detail.username_score >= 0.80:
+    if meta_detail.username_score >= 0.90:
         specific_reasons.append(
-            "Algorithmic Username: Matches Reddit's default auto-generated format (Adjective_Noun_1234)."
+            "Explicit Bot Username: Username explicitly declares an automated bot or service identity."
+        )
+    elif getattr(meta_detail, "is_default_username", False):
+        specific_reasons.append(
+            "Default Reddit Handle: Standard auto-suggested format (Adjective-Noun-1234), common among mobile & Google signups."
+        )
+    elif getattr(meta_detail, "is_custom_username", False):
+        specific_reasons.append(
+            "Custom Username Handle: Organic handle chosen by user."
         )
     if meta_detail.dormancy_score >= 0.60:
         specific_reasons.append(
@@ -177,6 +185,20 @@ def _build_score_explanation(
     if meta_detail.karma_score >= 0.60:
         specific_reasons.append(
             "Karma Asymmetry: Extreme ratio between link and comment karma or superhuman karma gain velocity."
+        )
+
+    # --- Network & Coordination ---
+    if getattr(network_detail, "syndication_score", 0.0) >= 0.60:
+        specific_reasons.append(
+            "External Link Syndication: Repeated posting of external domains, shorteners, or promotional redirects."
+        )
+    if getattr(network_detail, "swarming_score", 0.0) >= 0.60:
+        specific_reasons.append(
+            "Temporal Thread Swarming: Repeated synchronized comments within 90s in coordinated threads."
+        )
+    if getattr(network_detail, "reciprocal_score", 0.0) >= 0.60:
+        specific_reasons.append(
+            "Reciprocal Echo-Chamber: Mutual back-and-forth validation loop with partner accounts."
         )
 
     # Include custom notes
@@ -250,6 +272,9 @@ def compute_dynamic_weights(
         network_detail.cooccurrence_score > 0
         or network_detail.reply_pair_score > 0
         or network_detail.known_bot_association > 0
+        or getattr(network_detail, "syndication_score", 0.0) > 0
+        or getattr(network_detail, "swarming_score", 0.0) > 0
+        or getattr(network_detail, "reciprocal_score", 0.0) > 0
     )
 
     # 1. Sparse / Hidden History Handling
@@ -263,21 +288,32 @@ def compute_dynamic_weights(
         return round(w_meta / s, 4), round(w_temporal / s, 4), round(w_linguistic / s, 4), round(w_network / s, 4), dynamic_notes
 
     # 2. Linguistic Decoupling (The "Clean Grammar" Bot & Human Astroturfer Shield Breaker)
-    # When text scores very low (natural English), but metadata or temporal flags are distinctly anomalous
+    # When text scores very low (natural English), but behavioral flags are distinctly anomalous.
+    # CRITICAL: Decouple ONLY if strong, confirmed behavioral anomalies exist, preventing
+    # mild metadata noise (like a default Reddit username) from decoupling human text.
     s_ling = linguistic_detail.final_score
     s_temp = temporal_detail.final_score
     s_meta = meta_detail.final_score
     s_net = network_detail.final_score
     non_ling_max = max(s_temp, s_meta, s_net)
 
-    if s_ling < 0.25 and non_ling_max >= 0.50:
+    has_confirmed_automation_flag = (
+        temporal_detail.shift_pattern_score >= 0.65       # 24/7 superhuman operation
+        or temporal_detail.burst_score >= 0.80           # mass burst posting
+        or temporal_detail.dispersion_score >= 0.80      # rapid sub hopping
+        or getattr(network_detail, "syndication_score", 0.0) >= 0.70  # link syndication
+        or meta_detail.username_score >= 0.90            # explicit bot name
+        or (s_temp >= 0.65 and s_meta >= 0.60)           # multiple corroborating flags
+    )
+
+    if s_ling < 0.25 and non_ling_max >= 0.70 and has_confirmed_automation_flag:
         # Natural text, but behavioral timeline or account origin screams bot/spammer/sleeper
         w_linguistic = 0.08
         w_temporal = 0.45
         w_meta = 0.32
         w_network = 0.15 if has_network_data else 0.0
         dynamic_notes.append(
-            "Dynamic weighting: linguistic decoupling applied (natural text with anomalous temporal/metadata signals)"
+            "Dynamic weighting: linguistic decoupling applied (natural text with confirmed behavioral/temporal anomalies)"
         )
     else:
         # 3. Monomania & Political / Astroturfing Cluster Boost
@@ -563,6 +599,28 @@ async def analyze_user(
 
     if boost_factor > 0:
         bot_score = raw_score + (1.0 - raw_score) * boost_factor
+    else:
+        # ── Human Organic Shield / Dampener ───────────────────────────────────
+        # Protect authentic human accounts from false positive noise accumulation.
+        # If an account exhibits clear organic human signatures:
+        # 1. Natural linguistic score (no bot phrases, low template repetition)
+        # 2. Natural circadian rhythm (no 24/7 continuous operation)
+        # 3. No superhuman bursts or rapid dispersion
+        # 4. No explicit bot username or link syndication
+        is_organic_human = (
+            linguistic_detail.final_score <= 0.20
+            and linguistic_detail.phrase_score == 0.0
+            and getattr(linguistic_detail, "template_score", 0.0) < 0.35
+            and temporal_detail.shift_pattern_score == 0.0
+            and temporal_detail.burst_score < 0.60
+            and meta_detail.username_score < 0.80
+            and getattr(network_detail, "syndication_score", 0.0) < 0.60
+        )
+        if is_organic_human:
+            bot_score = min(bot_score, 0.20)
+            custom_notes.append(
+                "Organic human shield: Verified biological sleep pattern, natural vocabulary, and organic posting cadence"
+            )
 
     bot_score = round(min(max(bot_score, 0.0), 1.0), 4)
     label = _apply_label(bot_score)
