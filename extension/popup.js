@@ -26,15 +26,21 @@ async function checkServer() {
   }
 }
 
-// Query active tab count
+// Query scan stats from background service worker or active tab
 try {
-  chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-    if (tabs[0]) {
-      chrome.tabs.sendMessage(tabs[0].id, { type: "GET_COUNT" }, (response) => {
-        if (response && typeof response.count === "number") {
-          document.getElementById("labeledCount").innerText = response.count;
-        } else {
-          document.getElementById("labeledCount").innerText = "Active";
+  chrome.runtime.sendMessage({ type: "GET_COUNT" }, (response) => {
+    if (response && typeof response.count === "number" && response.count > 0) {
+      document.getElementById("labeledCount").innerText = response.count;
+    } else {
+      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+        if (tabs[0]) {
+          chrome.tabs.sendMessage(tabs[0].id, { type: "GET_COUNT" }, (tabResp) => {
+            if (tabResp && typeof tabResp.count === "number") {
+              document.getElementById("labeledCount").innerText = tabResp.count;
+            } else {
+              document.getElementById("labeledCount").innerText = "Active";
+            }
+          });
         }
       });
     }
@@ -44,4 +50,3 @@ try {
 }
 
 checkServer();
-

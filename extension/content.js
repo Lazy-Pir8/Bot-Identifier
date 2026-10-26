@@ -3,16 +3,83 @@
  * 
  * Dynamically finds author handles across Reddit (Old Reddit, New Reddit & Shreddit),
  * requests bot ratings from the local API server (http://127.0.0.1:8000),
- * and injects a single color-coded badge strictly to the right of the author's name.
+ * and injects a single color-coded badge strictly next to the author's username.
  */
 
 const API_SERVER = "http://127.0.0.1:8000";
-const PENDING_QUEUE = new Map(); // username -> Array of DOM elements
+const PENDING_QUEUE = new Map(); // username -> { elements: [], commentBody: "", commentId: "" }
 const CLIENT_CACHE = new Map();  // username -> result data (in-memory instant cache)
 let debounceTimer = null;
 
 // Track scanned stats for the extension popup
 let labeledCount = 0;
+
+// Respond to popup status queries
+try {
+  chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+    if (msg.type === "GET_COUNT") {
+      sendResponse({ count: labeledCount });
+    }
+  });
+} catch (_) {}
+
+// CSS styles injected into Web Component shadow roots so badges are fully styled
+const SHADOW_BADGE_CSS = `
+  .rbi-badge {
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    min-width: 26px !important;
+    height: 15px !important;
+    padding: 0 4px !important;
+    margin-left: 5px !important;
+    margin-right: 4px !important;
+    vertical-align: middle !important;
+    align-self: center !important;
+    flex-shrink: 0 !important;
+    border-radius: 9999px !important;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif !important;
+    font-size: 10px !important;
+    font-weight: 700 !important;
+    letter-spacing: 0.02em !important;
+    color: #ffffff !important;
+    line-height: 15px !important;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.4) !important;
+    cursor: pointer !important;
+    user-select: none !important;
+    white-space: nowrap !important;
+    transition: transform 0.12s ease, box-shadow 0.12s ease !important;
+    z-index: 10 !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    box-sizing: border-box !important;
+  }
+  .rbi-badge:hover {
+    transform: scale(1.14);
+  }
+  .rbi-tier-1 { background: linear-gradient(135deg, #10b981, #059669) !important; box-shadow: 0 1px 3px rgba(16, 185, 129, 0.35) !important; }
+  .rbi-tier-2 { background: linear-gradient(135deg, #14b8a6, #0d9488) !important; box-shadow: 0 1px 3px rgba(20, 184, 166, 0.35) !important; }
+  .rbi-tier-3 { background: linear-gradient(135deg, #06b6d4, #0284c7) !important; box-shadow: 0 1px 3px rgba(6, 182, 212, 0.35) !important; }
+  .rbi-tier-4 { background: linear-gradient(135deg, #eab308, #ca8a04) !important; box-shadow: 0 1px 3px rgba(234, 179, 8, 0.40) !important; }
+  .rbi-tier-5 { background: linear-gradient(135deg, #f97316, #ea580c) !important; box-shadow: 0 1px 4px rgba(249, 115, 22, 0.45) !important; }
+  .rbi-tier-6 { background: linear-gradient(135deg, #f43f5e, #e11d48) !important; box-shadow: 0 1px 5px rgba(244, 63, 94, 0.50) !important; }
+  .rbi-tier-7 { background: linear-gradient(135deg, #ff1744, #d50000) !important; box-shadow: 0 1px 6px rgba(255, 23, 68, 0.60) !important; }
+  .rbi-high-bot { animation: rbi-pulse 2s infinite ease-in-out; }
+  @keyframes rbi-pulse {
+    0%, 100% { box-shadow: 0 0 5px rgba(255, 23, 68, 0.5); }
+    50% { box-shadow: 0 0 12px rgba(255, 23, 68, 0.95); }
+  }
+`;
+
+function ensureShadowStyles(root) {
+  if (!root || root === document) return;
+  if (root.querySelector && !root.querySelector("#rbi-shadow-styles")) {
+    const style = document.createElement("style");
+    style.id = "rbi-shadow-styles";
+    style.textContent = SHADOW_BADGE_CSS;
+    root.appendChild(style);
+  }
+}
 
 // Singleton global tooltip element attached to document.body (never clipped by parent overflow)
 let globalTooltip = null;
@@ -185,14 +252,14 @@ function extractCommentId(element) {
  * Extract clean Reddit username from a link or element
  */
 function extractUsername(element) {
-  // 1. Shreddit custom element attribute or slot
+  // 1. Shreddit custom element attribute on self
   if (element.hasAttribute("author")) {
     const a = element.getAttribute("author");
-    if (a && a !== "[deleted]" && a !== "[removed]") return a.replace(/^u\//, "");
+    if (a && a !== "[deleted]" && a !== "[removed]") return a.replace(/^u\//i, "").trim();
   }
 
-  // 2. Check href pattern: /user/<username>/ or /u/<username>/
-  const href = element.getAttribute("href") || "";
+  // 2. Check href on element or inside element
+  const href = element.getAttribute("href") || element.querySelector?.("a[href*='/user/'], a[href*='/u/']")?.getAttribute("href") || "";
   const match = href.match(/\/(?:user|u)\/([A-Za-z0-9_\-]+)/i);
   if (match) {
     const name = match[1];
@@ -202,10 +269,18 @@ function extractUsername(element) {
     }
   }
 
-  // 3. Fallback to clean inner text if formatted as u/Name or Name
-  const text = (element.innerText || "").trim().replace(/^u\//, "");
-  if (text && /^[A-Za-z0-9_\-]{3,20}$/.test(text) && !text.includes(" ")) {
-    return text;
+  // 3. Check ancestor shreddit container author attribute
+  const shredditParent = element.closest?.("shreddit-comment[author], shreddit-post[author]");
+  if (shredditParent) {
+    const a = shredditParent.getAttribute("author");
+    if (a && a !== "[deleted]" && a !== "[removed]") return a.replace(/^u\//i, "").trim();
+  }
+
+  // 4. Fallback to clean inner text if formatted as u/Name or Name
+  const text = (element.innerText || "").trim().replace(/^u\//i, "");
+  const firstWord = text.split(/[\s\n•·]+/)[0];
+  if (firstWord && /^[A-Za-z0-9_\-]{3,20}$/.test(firstWord)) {
+    return firstWord;
   }
 
   return null;
@@ -216,10 +291,18 @@ function extractUsername(element) {
  * (and NOT an avatar, icon, or mention inside comment body).
  */
 function isValidAuthorElement(el, username) {
+  if (!el || !el.isConnected) return false;
+
+  // Never accept custom component containers themselves as the badge anchor
+  const tag = (el.tagName || "").toLowerCase();
+  if (tag === "shreddit-comment" || tag === "shreddit-post" || tag === "article") {
+    return false;
+  }
+
   // 1. Must NOT be an avatar, icon, or inside an avatar/icon container
   if (
-    el.closest('[slot*="Avatar"], [slot*="avatar"], [data-testid*="avatar" i], [data-testid*="icon" i], [aria-label*="avatar" i], .avatar') ||
-    el.matches('[slot*="Avatar"], [slot*="avatar"], [data-testid*="avatar" i], [aria-label*="avatar" i]')
+    el.closest('[slot*="Avatar"], [slot*="avatar"], [slot*="avitar"], [data-testid*="avatar" i], [data-testid*="icon" i], [aria-label*="avatar" i], .avatar') ||
+    el.matches('[slot*="Avatar"], [slot*="avatar"], [slot*="avitar"], [data-testid*="avatar" i], [aria-label*="avatar" i]')
   ) {
     return false;
   }
@@ -230,7 +313,7 @@ function isValidAuthorElement(el, username) {
   }
 
   // 3. Must NOT be inside comment text body or markdown paragraphs (which are user mentions like u/someone, not authors)
-  if (el.closest('[data-testid="comment-body"], .usertext-body, [slot="comment-body"], .md p, p')) {
+  if (el.closest('[data-testid="comment-body"], .usertext-body, [slot="comment"], [slot="comment-body"], div[id*="-comment-rtjson-content"], .md p')) {
     return false;
   }
 
@@ -240,20 +323,22 @@ function isValidAuthorElement(el, username) {
     return false;
   }
 
-  // 5. Must contain text matching the username
-  const text = (el.innerText || "").trim().replace(/^u\//i, "");
-  if (!text) {
-    return false;
-  }
-  const cleanWord = text.split(/[\s\n]+/)[0].replace(/^u\//i, "");
-  if (cleanWord.toLowerCase() !== username.toLowerCase()) {
-    return false;
+  // 5. Must contain text matching the username if it is an anchor/span display element
+  const text = (el.innerText || "").trim().toLowerCase();
+  if (text) {
+    if (!text.includes(username.toLowerCase())) {
+      return false;
+    }
   }
 
   // 6. Check if parent comment/post or immediate context ALREADY has a badge or was labeled
-  const parentContainer = el.closest('shreddit-comment, shreddit-post, div.comment, [data-testid="comment"], [data-testid="post-container"], article, tr.thing');
-  if (parentContainer && (parentContainer.dataset.rbiLabeled === "true" || parentContainer.querySelector('.rbi-badge'))) {
-    return false;
+  const parentContainer = el.closest('shreddit-comment, shreddit-post, div.comment, [data-testid="comment"], [data-testid="post-container"], tr.thing');
+  if (parentContainer) {
+    if (parentContainer.dataset.rbiLabeled === "true" ||
+        parentContainer.querySelector('.rbi-badge') ||
+        parentContainer.shadowRoot?.querySelector('.rbi-badge')) {
+      return false;
+    }
   }
 
   // 7. Check sibling
@@ -306,26 +391,43 @@ function escapeHtml(text) {
 }
 
 /**
- * Inject single badge strictly next to author element
+ * Inject single badge strictly next to the author handle element
  */
 function injectBadge(el, result) {
   if (!el || !el.isConnected) return;
 
-  // Ensure this comment or post container hasn't already received a badge
-  const parentContainer = el.closest('shreddit-comment, shreddit-post, div.comment, [data-testid="comment"], [data-testid="post-container"], article, tr.thing');
-  if (parentContainer && (parentContainer.dataset.rbiLabeled === "true" || parentContainer.querySelector('.rbi-badge'))) {
+  // Check parent container
+  const parentContainer = el.closest('shreddit-comment, shreddit-post, div.comment, [data-testid="comment"], [data-testid="post-container"], tr.thing');
+  if (parentContainer) {
+    if (parentContainer.dataset.rbiLabeled === "true" ||
+        parentContainer.querySelector('.rbi-badge') ||
+        parentContainer.shadowRoot?.querySelector('.rbi-badge')) {
+      return;
+    }
+  }
+
+  // Determine the exact insertion target right next to the username
+  // If the anchor is wrapped by a hovercard, placing right after the anchor or hovercard ensures correct flow
+  let target = el;
+  if (el.parentElement && el.parentElement.tagName.toLowerCase() === "faceplate-hovercard") {
+    target = el.parentElement;
+  }
+
+  // Prevent duplicate badge directly next to target
+  if (target.nextElementSibling && target.nextElementSibling.classList.contains("rbi-badge")) {
     return;
   }
 
-  // Prevent duplicate badge directly next to element
-  if (el.nextElementSibling && el.nextElementSibling.classList.contains("rbi-badge")) {
-    return;
+  // If inside a shadow root, ensure badge styles are injected into that shadow root
+  const root = target.getRootNode();
+  if (root && root !== document) {
+    ensureShadowStyles(root);
   }
 
   const badge = createBadge(result);
 
-  // Always place strictly to the RIGHT of the author name element
-  el.insertAdjacentElement("afterend", badge);
+  // Position strictly to the RIGHT of the username handle
+  target.insertAdjacentElement("afterend", badge);
 
   if (parentContainer) {
     parentContainer.dataset.rbiLabeled = "true";
@@ -338,29 +440,23 @@ function injectBadge(el, result) {
  * Scan DOM for unparsed author elements
  */
 function scanAuthors(isInitial = false) {
-  // Strictly target author name elements across Old Reddit, New Reddit, and Shreddit
-  const selectors = [
-    '[slot="authorName"]:not([data-rbi-checked])',                      // Shreddit comments & posts
-    'a[data-testid="comment_author"]:not([data-rbi-checked])',           // New Reddit comments
-    'a[data-testid="post_author"]:not([data-rbi-checked])',              // New Reddit posts
-    'a[data-testid="author-link"]:not([data-rbi-checked])',              // Reddit web author links
-    'a.author:not([data-rbi-checked])',                                  // Old Reddit
-    'a[href*="/user/"]:not([data-rbi-checked])',                         // Generic user links
-    'a[href*="/u/"]:not([data-rbi-checked])'
-  ];
-
-  const elements = document.querySelectorAll(selectors.join(", "));
   let added = 0;
 
-  elements.forEach((el) => {
-    // Avoid re-processing
-    el.dataset.rbiChecked = "true";
-
-    const username = extractUsername(el);
-    if (!username) return;
-
-    // Strict validation: must be author name text, NOT an avatar or comment body mention
+  function registerCandidate(el, username) {
+    if (!el || !el.isConnected) return;
     if (!isValidAuthorElement(el, username)) return;
+
+    // Check if container already labeled
+    const parentContainer = el.closest('shreddit-comment, shreddit-post, div.comment, [data-testid="comment"], [data-testid="post-container"], tr.thing');
+    if (parentContainer) {
+      if (parentContainer.dataset.rbiLabeled === "true" ||
+          parentContainer.querySelector('.rbi-badge') ||
+          parentContainer.shadowRoot?.querySelector('.rbi-badge')) {
+        return;
+      }
+    }
+
+    el.dataset.rbiChecked = "true";
 
     // Fast Step 0: In-memory client cache lookup (0.0ms instant render)
     if (CLIENT_CACHE.has(username)) {
@@ -385,6 +481,60 @@ function scanAuthors(isInitial = false) {
       entry.commentId = commentId;
     }
     added++;
+  }
+
+  // 1. Scan direct light-DOM author elements across all Reddit versions
+  const selectors = [
+    'faceplate-tracker[source="post_author"] a:not([data-rbi-checked])',
+    'faceplate-tracker[source="comment_author"] a:not([data-rbi-checked])',
+    '[slot="authorName"] a:not([data-rbi-checked])',
+    '[slot="authorName"]:not([data-rbi-checked])',
+    'a[data-testid="comment_author"]:not([data-rbi-checked])',
+    'a[data-testid="post_author"]:not([data-rbi-checked])',
+    'a[data-testid="author-link"]:not([data-rbi-checked])',
+    'a.author:not([data-rbi-checked])',
+    'a[href*="/user/"]:not([data-rbi-checked])',
+    'a[href*="/u/"]:not([data-rbi-checked])'
+  ];
+
+  document.querySelectorAll(selectors.join(", ")).forEach((el) => {
+    const tag = (el.tagName || "").toLowerCase();
+    if (tag === "shreddit-comment" || tag === "shreddit-post" || tag === "article") return;
+
+    const username = extractUsername(el);
+    if (!username) return;
+
+    registerCandidate(el, username);
+  });
+
+  // 2. Scan Shreddit custom components to pierce shadowRoot for encapsulated author links
+  document.querySelectorAll('shreddit-comment, shreddit-post').forEach((container) => {
+    if (container.dataset.rbiLabeled === "true") return;
+
+    const rawAuthor = container.getAttribute("author");
+    if (!rawAuthor || rawAuthor === "[deleted]" || rawAuthor === "[removed]") return;
+
+    const cleanUsername = rawAuthor.replace(/^u\//i, "").trim();
+
+    // First check light DOM inside container
+    const lightAuthor = container.querySelector(
+      'faceplate-tracker[source="comment_author"] a:not([data-rbi-checked]), faceplate-tracker[source="post_author"] a:not([data-rbi-checked]), [slot="authorName"] a:not([data-rbi-checked]), [slot="authorName"]:not([data-rbi-checked])'
+    );
+    if (lightAuthor) {
+      registerCandidate(lightAuthor, cleanUsername);
+      return;
+    }
+
+    // Next check open shadowRoot inside container
+    if (container.shadowRoot) {
+      const shadowAuthor = container.shadowRoot.querySelector(
+        'a.author:not([data-rbi-checked]), a[href*="/user/"]:not([data-rbi-checked]):not([slot*="avatar"]):not([slot*="avitar"]):not([aria-label*="avatar"])'
+      );
+      if (shadowAuthor) {
+        registerCandidate(shadowAuthor, cleanUsername);
+        return;
+      }
+    }
   });
 
   if (added > 0) {
@@ -423,18 +573,51 @@ async function processBatchQueue() {
   });
 
   try {
-    const resp = await fetch(`${API_SERVER}/api/scan-users`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        users: usersPayload,
-        usernames: usernamesPayload,
-      }),
-    });
+    let data = null;
 
-    if (!resp.ok) return;
+    // Fast Step A: Request via Background Service Worker (immune to page CSP & Private Network Access restrictions)
+    try {
+      const bgResp = await new Promise((resolve) => {
+        chrome.runtime.sendMessage(
+          {
+            type: "SCAN_USERS",
+            payload: {
+              users: usersPayload,
+              usernames: usernamesPayload,
+            },
+          },
+          (res) => {
+            if (chrome.runtime.lastError || !res || !res.ok) {
+              resolve(null);
+            } else {
+              resolve(res.data);
+            }
+          }
+        );
+      });
+      if (bgResp && bgResp.results) {
+        data = bgResp;
+      }
+    } catch (_) {}
 
-    const data = await resp.json();
+    // Fallback Step B: Direct fetch to local server
+    if (!data) {
+      const resp = await fetch(`${API_SERVER}/api/scan-users`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          users: usersPayload,
+          usernames: usernamesPayload,
+        }),
+      });
+
+      if (resp.ok) {
+        data = await resp.json();
+      }
+    }
+
+    if (!data) return;
+
     const results = data.results || {};
 
     elementsToUpdate.forEach((elements, username) => {

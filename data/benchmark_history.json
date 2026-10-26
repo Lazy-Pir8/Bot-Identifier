@@ -89,5 +89,31 @@
     "tn": 5,
     "fp": 0,
     "fn": 0
+  },
+  {
+    "timestamp": 1793031049.6783547,
+    "total": 15,
+    "accuracy": 1.0,
+    "precision": 1.0,
+    "recall": 1.0,
+    "f1": 1.0,
+    "fpr": 0.0,
+    "tp": 10,
+    "tn": 5,
+    "fp": 0,
+    "fn": 0
+  },
+  {
+    "timestamp": 1793051927.6901577,
+    "total": 15,
+    "accuracy": 1.0,
+    "precision": 1.0,
+    "recall": 1.0,
+    "f1": 1.0,
+    "fpr": 0.0,
+    "tp": 10,
+    "tn": 5,
+    "fp": 0,
+    "fn": 0
   }
 ]

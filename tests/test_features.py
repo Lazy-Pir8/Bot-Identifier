@@ -391,6 +391,31 @@ class TestEvidenceHierarchy:
         raw_score = w_meta * meta.final_score + w_temp * temp.final_score + w_ling * ling.final_score
         assert raw_score < 0.25, f"Authentic human with default username should score safely low, got {raw_score}"
 
+    def test_shared_session_no_type_error(self):
+        import asyncio
+        from src.collectors.reddit_collector import get_shared_session
+        async def _check():
+            sess = await get_shared_session()
+            assert sess is not None
+            assert not sess.closed
+        asyncio.run(_check())
+
+    def test_cors_private_network_access_header(self):
+        from src.server import make_app
+        from aiohttp.test_utils import TestClient, TestServer
+        import asyncio
+        async def _check():
+            app = make_app()
+            client = TestClient(TestServer(app))
+            await client.start_server()
+            try:
+                resp = await client.options("/api/scan-users", headers={"Access-Control-Request-Private-Network": "true"})
+                assert resp.status == 204
+                assert resp.headers.get("Access-Control-Allow-Private-Network") == "true"
+            finally:
+                await client.close()
+        asyncio.run(_check())
+
 
 # ─── Run tests directly ────────────────────────────────────────────────────────
 

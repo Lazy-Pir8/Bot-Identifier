@@ -184,7 +184,7 @@ _SHARED_SESSION: Optional[aiohttp.ClientSession] = None
 async def get_shared_session() -> aiohttp.ClientSession:
     global _SHARED_SESSION
     if _SHARED_SESSION is None or _SHARED_SESSION.closed:
-        connector = aiohttp.TCPConnector(limit=100, ttl_dns_roundrobin=300, keepalive_timeout=75)
+        connector = aiohttp.TCPConnector(limit=100, ttl_dns_cache=300, keepalive_timeout=75)
         _SHARED_SESSION = aiohttp.ClientSession(connector=connector)
     return _SHARED_SESSION
 
